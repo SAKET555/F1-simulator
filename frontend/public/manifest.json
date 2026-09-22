@@ -1,0 +1,17 @@
+{
+  "name": "SAK Racing Sim",
+  "short_name": "SAK SIM",
+  "description": "Real-time F1 Race & Strategy Simulator",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f1117",
+  "theme_color": "#e10600",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

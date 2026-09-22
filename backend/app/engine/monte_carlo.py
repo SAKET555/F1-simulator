@@ -211,3 +211,151 @@ def simulate_counterfactual(
         raise ValueError(f"car_id {car_id} not found in grid_state")
 
     return orig, cf
+
+
+def calculate_undercut(
+    current_lap: int,
+    total_laps: int,
+    grid_state: list[CarState],
+    car_id: int,
+    target_car_id: int,
+    pit_lap: int,
+    target_compound: str,
+    race_id: str = "",
+) -> dict:
+    """
+    Calculate whether pitting car_id on pit_lap will undercut target_car_id.
+    Returns will_undercut, gap projections, and breakeven lap.
+    """
+    pit_loss = _pit_loss(race_id)
+
+    car = next((c for c in grid_state if c.car_id == car_id), None)
+    target = next((c for c in grid_state if c.car_id == target_car_id), None)
+
+    if car is None or target is None:
+        return {
+            "will_undercut": False,
+            "gap_before_s": 0.0,
+            "projected_gap_after_s": 0.0,
+            "breakeven_lap": None,
+            "recommendation": "Driver not found in grid.",
+        }
+
+    gap_before = car.cumulative_time_s - target.cumulative_time_s
+    remaining_after_pit = total_laps - pit_lap
+
+    new_pace = BASE_PACE.get(target_compound, 0.0)
+    current_pace = BASE_PACE.get(car.tire_compound, 0.0)
+    pace_gain_per_lap = current_pace - new_pace
+
+    current_deg = DEGRADATION.get(car.tire_compound, 0.08) * car.tire_age_laps
+    gap_after_pit = gap_before + pit_loss - (pace_gain_per_lap + current_deg) * remaining_after_pit
+
+    will_undercut = gap_after_pit < 0
+
+    breakeven: int | None = None
+    if pace_gain_per_lap > 0:
+        n_laps = int(pit_loss / pace_gain_per_lap) + 1
+        candidate = pit_lap + n_laps
+        if candidate <= total_laps:
+            breakeven = candidate
+
+    if will_undercut:
+        rec = (
+            f"Undercut works. {car.driver_code} projects {abs(gap_after_pit):.1f}s "
+            f"ahead of {target.driver_code} by race end."
+        )
+    elif breakeven is not None:
+        rec = (
+            f"Undercut marginal. {car.driver_code} overtakes {target.driver_code} "
+            f"around lap {breakeven}."
+        )
+    else:
+        rec = (
+            f"Overcut recommended. Gap projected at +{gap_after_pit:.1f}s — "
+            f"insufficient pace gain from {target_compound}."
+        )
+
+    return {
+        "will_undercut": will_undercut,
+        "gap_before_s": round(gap_before, 3),
+        "projected_gap_after_s": round(gap_after_pit, 3),
+        "breakeven_lap": breakeven,
+        "recommendation": rec,
+    }
+
+
+def calculate_optimal_stop(
+    current_lap: int,
+    total_laps: int,
+    car_state: CarState,
+    race_id: str = "",
+    compounds_available: list[str] | None = None,
+) -> list[dict]:
+    """
+    For each available compound, find the optimal pit window.
+    Returns list of {compound, earliest_lap, latest_lap, optimal_lap, net_time_gain_s}.
+    """
+    if compounds_available is None:
+        compounds_available = ["MEDIUM", "HARD"]
+
+    pit_loss = _pit_loss(race_id)
+    results = []
+
+    for compound in compounds_available:
+        if compound == car_state.tire_compound:
+            continue
+
+        new_pace = BASE_PACE.get(compound, 0.0)
+        current_pace_val = BASE_PACE.get(car_state.tire_compound, 0.0)
+        new_deg = DEGRADATION.get(compound, 0.08)
+        current_deg = DEGRADATION.get(car_state.tire_compound, 0.08)
+
+        best_net_gain = float("-inf")
+        best_lap = current_lap + 1
+
+        for pit_lap in range(current_lap + 1, total_laps - 4):
+            remaining = total_laps - pit_lap
+            age_at_pit = car_state.tire_age_laps + (pit_lap - current_lap)
+
+            pace_delta = current_pace_val - new_pace
+            pace_gain = pace_delta * remaining
+
+            deg_saving = sum(
+                current_deg * (age_at_pit + i) - new_deg * i
+                for i in range(remaining)
+            )
+
+            net_gain = pace_gain + deg_saving - pit_loss
+            if net_gain > best_net_gain:
+                best_net_gain = net_gain
+                best_lap = pit_lap
+
+        earliest = best_lap
+        latest = best_lap
+
+        for dl in range(1, 8):
+            lap_candidate = best_lap - dl
+            if lap_candidate > current_lap:
+                remaining = total_laps - lap_candidate
+                net = (current_pace_val - new_pace) * remaining - pit_loss
+                if net > 0:
+                    earliest = lap_candidate
+
+        for dl in range(1, 8):
+            lap_candidate = best_lap + dl
+            if lap_candidate < total_laps - 5:
+                remaining = total_laps - lap_candidate
+                net = (current_pace_val - new_pace) * remaining - pit_loss
+                if net > 0:
+                    latest = lap_candidate
+
+        results.append({
+            "compound": compound,
+            "earliest_lap": earliest,
+            "latest_lap": latest,
+            "optimal_lap": best_lap,
+            "net_time_gain_s": round(best_net_gain, 2),
+        })
+
+    return sorted(results, key=lambda r: -r["net_time_gain_s"])

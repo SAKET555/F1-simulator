@@ -9,6 +9,7 @@ export default function RaceSelector({ onSelect, onLive }) {
   const [season,       setSeason]       = useState("LIVE");
   const [liveStatus,   setLiveStatus]   = useState(null);   // null | { live, session }
   const [liveChecking, setLiveChecking] = useState(false);
+  const [searchQuery,  setSearchQuery]  = useState("");
 
   // Load race catalogue
   useEffect(() => {
@@ -39,7 +40,12 @@ export default function RaceSelector({ onSelect, onLive }) {
   if (error)   return <p className="text-red-400 text-sm p-6">{error}</p>;
 
   const years = [...new Set(races.map((r) => r.year))].sort((a, b) => b - a);
-  const filtered = season !== "LIVE" ? races.filter((r) => r.year === Number(season)) : [];
+  const seasonRaces = season !== "LIVE" ? races.filter((r) => r.year === Number(season)) : [];
+  const filtered = seasonRaces.filter(r =>
+    !searchQuery ||
+    r.circuit?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    r.event_name?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -131,6 +137,14 @@ export default function RaceSelector({ onSelect, onLive }) {
 
       {/* Historical race grid */}
       {season !== "LIVE" && (
+        <>
+        <input
+          type="text"
+          placeholder="Search circuits…"
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          className="w-full bg-pitwall border border-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-gray-500"
+        />
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {filtered.map((race) => (
             <button
@@ -165,6 +179,7 @@ export default function RaceSelector({ onSelect, onLive }) {
             </button>
           ))}
         </div>
+        </>
       )}
     </div>
   );

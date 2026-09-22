@@ -1,11 +1,17 @@
 from fastapi import APIRouter, HTTPException
 from app.engine.data_loader import load_session_laps, get_race_meta
-from app.engine.monte_carlo import simulate_counterfactual, simulate_race
+from app.engine.monte_carlo import (
+    simulate_counterfactual, simulate_race,
+    calculate_undercut, calculate_optimal_stop,
+)
 from app.engine.replay import _build_car_states
 from app.schemas.race import (
     CounterfactualRequest,
     CounterfactualResponse,
     PredictionFrame,
+    UndercutRequest,
+    UndercutResponse,
+    OptimalStopRequest,
 )
 
 router = APIRouter(prefix="/simulate", tags=["simulate"])
@@ -76,3 +82,53 @@ async def counterfactual(req: CounterfactualRequest):
         delta_podium_pct=round(cf_wp.podium_pct - original_wp.podium_pct, 2),
         explanation=explanation,
     )
+
+
+@router.post("/undercut", response_model=UndercutResponse)
+async def undercut_analysis(req: UndercutRequest):
+    if get_race_meta(req.race_id) is None:
+        raise HTTPException(status_code=404, detail=f"Race '{req.race_id}' not found")
+    try:
+        laps_df, total_laps = load_session_laps(req.race_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    lap_group = laps_df[laps_df["LapNumber"] == req.current_lap]
+    grid_state = _build_car_states(lap_group, laps_df, req.current_lap)
+
+    result = calculate_undercut(
+        current_lap=req.current_lap,
+        total_laps=total_laps,
+        grid_state=grid_state,
+        car_id=req.car_id,
+        target_car_id=req.target_car_id,
+        pit_lap=req.pit_lap,
+        target_compound=req.target_compound,
+        race_id=req.race_id,
+    )
+    return UndercutResponse(**result)
+
+
+@router.post("/optimal-stop")
+async def optimal_stop(req: OptimalStopRequest):
+    if get_race_meta(req.race_id) is None:
+        raise HTTPException(status_code=404, detail=f"Race '{req.race_id}' not found")
+    try:
+        laps_df, _ = load_session_laps(req.race_id)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+
+    lap_group = laps_df[laps_df["LapNumber"] == req.current_lap]
+    grid_state = _build_car_states(lap_group, laps_df, req.current_lap)
+    car_state = next((c for c in grid_state if c.car_id == req.car_id), None)
+    if car_state is None:
+        raise HTTPException(status_code=404, detail=f"Car {req.car_id} not in grid")
+
+    windows = calculate_optimal_stop(
+        current_lap=req.current_lap,
+        total_laps=req.total_laps,
+        car_state=car_state,
+        race_id=req.race_id,
+        compounds_available=list(req.compounds_available) if req.compounds_available else None,
+    )
+    return {"windows": windows}
