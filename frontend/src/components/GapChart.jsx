@@ -92,6 +92,13 @@ export default function GapChart({ raceId }) {
             tickFormatter={v => `+${v}s`} />
           <Tooltip
             contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 8, fontSize: 11 }}
+            labelStyle={{ color: "#e5e7eb" }}
+            /* Recharts colors each tooltip row using that line's own
+               stroke by default — several palette colors (e.g. the dark
+               navy used for one driver) read fine as a thin line but are
+               nearly illegible as text on this dark background. Force a
+               single readable color for all rows instead. */
+            itemStyle={{ color: "#e5e7eb" }}
             formatter={(val, name, props) => {
               if (val == null) return ["DNF", name];
               const lt = props.payload?.[`${name}__lt`];

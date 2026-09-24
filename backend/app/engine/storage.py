@@ -72,9 +72,12 @@ def load(race_id: str) -> tuple[pd.DataFrame, int] | None:
 # time. Bump this whenever a bug fix changes what a cached entry *means* —
 # e.g. v2 fixes qualifying (session.load(messages=False) meant FastF1
 # couldn't calculate quali classification without Ergast, so every driver
-# cached as Position=99/Q1-3=null) — so old, wrong entries are rebuilt
-# instead of silently keeping the bug alive forever.
-EXTRA_CACHE_VERSION = 2
+# cached as Position=99/Q1-3=null); v3 fixes telemetry (get_car_data() has
+# no X/Y columns at all, so every cached point had x=0, y=0 regardless of
+# whether real position data existed — the track map could never have
+# drawn anything from a v2-or-earlier cached entry) — so old, wrong
+# entries are rebuilt instead of silently keeping the bug alive forever.
+EXTRA_CACHE_VERSION = 3
 
 
 def _extra_path(key: str) -> Path:

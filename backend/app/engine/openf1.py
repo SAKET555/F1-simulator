@@ -130,12 +130,26 @@ def build_car_states(
         stints_by_drv[int(s["driver_number"])] = s
 
     # --- latest gap per driver (from intervals) ---------------------------
+    # OpenF1's own gap_to_leader is already authoritative live-timing data
+    # (unlike the historical replay path, which has to reconstruct this
+    # itself from raw laps) — including already reporting a lapped car as
+    # a string like "+1 LAP" rather than a time. Previously that string had
+    # "LAP" replaced with "99", producing a fake 99-*second* gap with no
+    # relation to being a lap down; now it sets laps_down instead, the same
+    # field (and the same "+N LAP" display) the historical replay path uses
+    # — see _build_car_states in replay.py for why a lapped car shouldn't
+    # be shown with a numeric time gap at all.
     gap_by_drv: dict[int, float] = {}
+    laps_down_by_drv: dict[int, int] = {}
     for iv in intervals:
         dn = int(iv["driver_number"])
-        g  = iv.get("gap_to_leader", "")
+        g  = str(iv.get("gap_to_leader", "") or "")
+        if "LAP" in g.upper():
+            digits = "".join(c for c in g if c.isdigit())
+            laps_down_by_drv[dn] = int(digits) if digits else 1
+            continue
         try:
-            gap_by_drv[dn] = abs(float(str(g).replace("+", "").replace("LAP", "99")))
+            gap_by_drv[dn] = abs(float(g.replace("+", "")))
         except (ValueError, TypeError):
             gap_by_drv[dn] = 0.0
 
@@ -164,15 +178,39 @@ def build_car_states(
     if not cum_times:
         return [], current_lap, total_laps
 
-    # Sort by cumulative time
-    sorted_drvs = sorted(cum_times.items(), key=lambda x: x[1])
-    leader_cum  = sorted_drvs[0][1]
+    # The reference leader must come from drivers actually on the lead lap
+    # (laps_down == 0) — min(cum_times.values()) alone reproduces the exact
+    # bug being fixed here: a driver who's fallen a lap down has *fewer*
+    # laps summed into cum_times, so their raw sum can easily be the
+    # smallest in the field despite them being behind, wrongly appointing
+    # them the reference leader and corrupting every fallback gap computed
+    # against it. (Caught by a synthetic test: a lapped driver who'd done
+    # only 1 of 2 laps ended up as leader_cum, giving the real, 2-lap
+    # leader a fabricated +88s gap.)
+    on_lead_lap_cums = [cum_times[dn] for dn in cum_times if laps_down_by_drv.get(dn, 0) == 0]
+    leader_cum = min(on_lead_lap_cums) if on_lead_lap_cums else min(cum_times.values())
+
+    # Rank primarily by laps_down (0 = on the lead lap), then by OpenF1's
+    # own official gap_to_leader within that bucket — the same principle
+    # used throughout the historical replay path (replay.py's
+    # _build_car_states): trust the live timing system's own computed
+    # values over re-deriving them from raw lap sums, which is exactly
+    # what cum_times is and why sorting by it alone had the same bug the
+    # historical path had — a driver who fell a lap down has fewer laps
+    # summed into cum_times, which made them look like they were *leading*
+    # once the field raced past whatever partial time they'd accumulated.
+    def sort_key(dn: int) -> tuple[int, float]:
+        return (laps_down_by_drv.get(dn, 0), gap_by_drv.get(dn, cum_times[dn] - leader_cum))
+
+    sorted_drvs = sorted(cum_times.keys(), key=sort_key)
 
     cars: list[CarState] = []
-    for pos, (dn, cum) in enumerate(sorted_drvs, 1):
+    for pos, dn in enumerate(sorted_drvs, 1):
         d      = drivers.get(dn, {})
         stint  = stints_by_drv.get(dn, {})
         ll     = last_laps.get(dn, {})
+        cum    = cum_times[dn]
+        laps_down = laps_down_by_drv.get(dn, 0)
 
         lap_start       = stint.get("lap_start", 1) or 1
         age_at_start    = stint.get("tyre_age_at_start", 0) or 0
@@ -188,11 +226,16 @@ def build_car_states(
             lap_number        = current_lap,
             lap_time_s        = float(ll["lap_duration"]) if ll.get("lap_duration") else None,
             cumulative_time_s = round(cum, 3),
-            gap_to_leader_s   = round(gap_by_drv.get(dn, cum - leader_cum), 3),
+            # A lapped car isn't meaningfully time-comparable to the lead
+            # lap (see replay.py) — send the same sentinel/behaviour the
+            # frontend already knows how to render as "+N LAP(S)" instead
+            # of a fabricated number of seconds.
+            gap_to_leader_s   = 99_999.0 if laps_down > 0 else round(gap_by_drv.get(dn, cum - leader_cum), 3),
             tire_compound     = compound if compound in ("SOFT","MEDIUM","HARD","INTERMEDIATE","WET") else "UNKNOWN",
             tire_age_laps     = tyre_age,
             is_in_pit         = bool(ll.get("is_pit_out_lap", False)),
             pit_count         = pit_count,
+            laps_down         = laps_down,
         ))
 
     return cars, current_lap, total_laps

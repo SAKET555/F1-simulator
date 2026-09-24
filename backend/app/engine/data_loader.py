@@ -322,7 +322,17 @@ def load_telemetry(race_id: str, driver_code: str, lap_number: int) -> list[dict
         lap_rows = drv_laps[drv_laps["LapNumber"] == lap_number]
         if lap_rows.empty:
             return []
-        tel = lap_rows.iloc[0].get_car_data().add_distance()
+        # get_car_data() only returns RPM/Speed/Throttle/Brake/DRS/gear — it
+        # has no X/Y columns at all, so reading row.get("X", 0) against it
+        # always silently fell through to the 0 default, for every race,
+        # regardless of whether real position data existed. That's why the
+        # track map never drew anything: every point normalized to the same
+        # (0, 0), collapsing to nothing recognizable. get_telemetry() merges
+        # car data with the separate position-data channel, which actually
+        # has X/Y (verified against real circuit-shaped coordinates for
+        # multiple seasons) — a driver-lap without position data raises
+        # here (caught below) rather than silently returning zeros.
+        tel = lap_rows.iloc[0].get_telemetry()
         points = []
         for _, row in tel.iterrows():
             t = row.get("Time")
