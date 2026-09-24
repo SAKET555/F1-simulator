@@ -21,6 +21,7 @@ class CarState(BaseModel):
     is_in_pit: bool = False
     speed_kmh: Optional[float] = None
     drs: bool = False
+    retired: bool = False   # true once this car has no further lap data (DNF)
 
 
 class RaceState(BaseModel):

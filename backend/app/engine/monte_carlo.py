@@ -87,30 +87,40 @@ def simulate_race(
     if not grid_state:
         return []
 
+    # Retired cars can't win or affect anyone else's finishing order — project
+    # win/podium chances only for cars still actually racing, and give
+    # retirees a flat 0%/0% at their already-classified (bottom-of-field)
+    # position instead of letting them roll forward through the rest of the
+    # race as if they were still on track.
+    active_state  = [c for c in grid_state if not c.retired]
+    retired_state = [c for c in grid_state if c.retired]
+
     remaining_laps = max(total_laps - current_lap, 0)
-    if remaining_laps == 0:
-        # Race finished – winner is P1
-        p1 = min(grid_state, key=lambda c: c.position)
+    if remaining_laps == 0 or not active_state:
+        # Race finished (or nobody left running) – winner is P1 among the
+        # still-classified/active field.
+        ordering = sorted(grid_state, key=lambda c: c.position)
+        p1 = next((c for c in ordering if not c.retired), None)
         return [
             WinProbability(
                 car_id=c.car_id,
                 driver_code=c.driver_code,
-                win_pct=100.0 if c.car_id == p1.car_id else 0.0,
-                podium_pct=100.0 if c.position <= 3 else 0.0,
+                win_pct=100.0 if (p1 is not None and c.car_id == p1.car_id) else 0.0,
+                podium_pct=100.0 if (not c.retired and c.position <= 3) else 0.0,
                 expected_position=float(c.position),
             )
-            for c in sorted(grid_state, key=lambda x: x.position)
+            for c in ordering
         ]
 
     pit_loss = _pit_loss(race_id)
-    n_cars = len(grid_state)
+    n_cars = len(active_state)
     rng = np.random.default_rng()
 
     # ── Build per-car base state arrays ─────────────────────────────────────
     # Shape: (n_cars,)
-    cum_times   = np.array([c.cumulative_time_s for c in grid_state], dtype=np.float64)
-    tire_ages   = np.array([c.tire_age_laps      for c in grid_state], dtype=np.float64)
-    compounds   = [c.tire_compound for c in grid_state]
+    cum_times   = np.array([c.cumulative_time_s for c in active_state], dtype=np.float64)
+    tire_ages   = np.array([c.tire_age_laps      for c in active_state], dtype=np.float64)
+    compounds   = [c.tire_compound for c in active_state]
     deg_rates   = np.array([DEGRADATION.get(cp, 0.08) for cp in compounds])
     base_paces  = np.array([BASE_PACE.get(cp, 0.0)    for cp in compounds])
 
@@ -148,7 +158,7 @@ def simulate_race(
     avg_pos       = positions.mean(axis=0)
 
     results: list[WinProbability] = []
-    for i, car in enumerate(grid_state):
+    for i, car in enumerate(active_state):
         results.append(
             WinProbability(
                 car_id=car.car_id,
@@ -156,6 +166,16 @@ def simulate_race(
                 win_pct=round(float(win_counts[i]) / n_simulations * 100, 2),
                 podium_pct=round(float(podium_counts[i]) / n_simulations * 100, 2),
                 expected_position=round(float(avg_pos[i]), 2),
+            )
+        )
+    for car in retired_state:
+        results.append(
+            WinProbability(
+                car_id=car.car_id,
+                driver_code=car.driver_code,
+                win_pct=0.0,
+                podium_pct=0.0,
+                expected_position=float(car.position),
             )
         )
 

@@ -97,6 +97,15 @@ def load_session_laps(race_id: str) -> tuple[pd.DataFrame, int]:
     laps = laps[laps["LapNumber"].notna()].copy()
     laps["LapNumber"] = laps["LapNumber"].astype(int)
     laps["LapTime_s"] = laps["LapTime"].dt.total_seconds()
+    # Cumulative session-elapsed time at which this lap was completed, as
+    # FastF1/the FIA timing feed computed it directly — kept alongside
+    # LapTime_s because the two are NOT interchangeable: the opening lap of
+    # a race has no LapTime (there's no previous lap to diff against, so
+    # FastF1 leaves it NaN), so summing LapTime_s across laps silently drops
+    # each driver's own — differing — opening-lap duration. Using Time_s
+    # directly for "how far has this driver got" avoids re-deriving (and
+    # subtly corrupting) a number FastF1 already computed correctly.
+    laps["Time_s"] = laps["Time"].dt.total_seconds()
 
     # FastF1 sometimes leaves the literal string "nan" (not a real null) in
     # this column, which .fillna() doesn't catch — it only slips through
@@ -122,7 +131,7 @@ def load_session_laps(race_id: str) -> tuple[pd.DataFrame, int]:
     total_laps = int(laps["LapNumber"].max())
 
     keep = ["DriverNumber", "Driver", "Team",
-            "LapNumber", "LapTime_s",
+            "LapNumber", "LapTime_s", "Time_s",
             "Compound", "TyreLife", "IsPitIn", "IsPitOut"]
     laps = laps[keep].reset_index(drop=True)
 

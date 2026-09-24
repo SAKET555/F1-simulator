@@ -2,9 +2,9 @@ import { useState, useEffect, useRef } from "react";
 import TireBadge from "./TireBadge";
 import { getTeamColor } from "../lib/constants";
 
-function GapDisplay({ gap }) {
+function GapDisplay({ gap, retired }) {
+  if (retired || gap === Infinity || gap > 9999) return <span className="text-gray-600 font-bold text-xs">DNF</span>;
   if (gap === 0) return <span className="text-f1red font-bold text-xs">LEAD</span>;
-  if (gap === Infinity || gap > 9999) return <span className="text-gray-600 text-xs">OUT</span>;
   return <span className="text-gray-300 text-xs">+{gap.toFixed(3)}s</span>;
 }
 
@@ -56,12 +56,12 @@ export default function Leaderboard({ cars = [], lap, totalLaps }) {
             <div
               key={car.car_id}
               className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors
-                ${idx === 0 ? "bg-panel border border-f1red/30" : "bg-panel/60 hover:bg-panel"}`}
+                ${car.retired ? "opacity-50" : idx === 0 ? "bg-panel border border-f1red/30" : "bg-panel/60 hover:bg-panel"}`}
               style={{ borderLeft: `3px solid ${teamColor}` }}
             >
               {/* Position */}
               <span className={`w-5 text-center font-bold text-xs flex-shrink-0 ${
-                idx === 0 ? "text-f1red" : idx < 3 ? "text-yellow-400" : "text-gray-400"
+                car.retired ? "text-gray-600" : idx === 0 ? "text-f1red" : idx < 3 ? "text-yellow-400" : "text-gray-400"
               }`}>
                 {car.position}
               </span>
@@ -99,11 +99,11 @@ export default function Leaderboard({ cars = [], lap, totalLaps }) {
 
               {/* Gap */}
               <div className="flex-1 text-right">
-                <GapDisplay gap={car.gap_to_leader_s} />
+                <GapDisplay gap={car.gap_to_leader_s} retired={car.retired} />
               </div>
 
               {/* Pit indicator */}
-              {car.is_in_pit && (
+              {car.is_in_pit && !car.retired && (
                 <span className="text-[9px] bg-blue-700 text-white px-1 rounded flex-shrink-0">PIT</span>
               )}
             </div>

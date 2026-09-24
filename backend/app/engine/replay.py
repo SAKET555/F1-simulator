@@ -27,6 +27,13 @@ _VALID_COMPOUNDS = {"SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET", "UNKNOWN"}
 _BASE_LAP_INTERVAL_S: float = 5.0   # wall-clock seconds at 1× (demo-friendly)
 
 
+# Sent in place of a real (finite) gap for retired cars, so the JSON payload
+# stays valid (float("inf") serializes to the non-standard "Infinity" token,
+# which JS's JSON.parse rejects) while still tripping the frontend's existing
+# "gap > 9999 => OUT" display rule.
+_RETIRED_GAP_SENTINEL: float = 99_999.0
+
+
 def _build_car_states(
     lap_group: pd.DataFrame,
     all_laps: pd.DataFrame,
@@ -35,6 +42,12 @@ def _build_car_states(
     """
     Build ordered list of CarState objects for a given lap snapshot.
     Ordering uses cumulative lap time to derive position.
+
+    Drivers who retired before `lap_number` (no further lap rows recorded)
+    are classified after every still-running car, ordered by how far they
+    got before retiring — not by their frozen partial cumulative time, which
+    would otherwise make an early DNF look like it's "leading" once the
+    field races past whatever tiny time they'd accumulated before stopping.
     """
     # All unique drivers in the session (includes DNFs)
     all_drivers = (
@@ -42,25 +55,42 @@ def _build_car_states(
         .drop_duplicates("DriverNumber")
     )
 
-    # Cumulative valid lap times up to this lap
-    past_valid = all_laps[
-        (all_laps["LapNumber"] <= lap_number) & (all_laps["LapTime_s"].notna())
-    ]
-    cum = (
-        past_valid.groupby("DriverNumber", sort=False)["LapTime_s"]
-        .sum()
-        .reset_index()
-        .rename(columns={"LapTime_s": "cumulative_time_s"})
+    # Each driver's most recent recorded lap at or before this lap number —
+    # "how far have they got by now". cumulative_time_s comes straight from
+    # that row's Time_s (FastF1's own cumulative session-elapsed time), not
+    # from summing LapTime_s: the opening lap has no LapTime (no previous
+    # lap to diff against), so summing silently drops each driver's own —
+    # differing — opening-lap duration and throws gap-to-leader off by
+    # hundreds of seconds. This same lookup also covers retirees, who have
+    # no row for lap_number itself — their last known state carries forward.
+    as_of = (
+        all_laps[all_laps["LapNumber"] <= lap_number]
+        .sort_values("LapNumber")
+        .groupby("DriverNumber")
+        .tail(1)
+        .rename(columns={"LapNumber": "as_of_lap", "Compound": "compound_asof", "TyreLife": "tyre_life_asof"})
+        [["DriverNumber", "as_of_lap", "Time_s", "compound_asof", "tyre_life_asof"]]
     )
 
-    # Left-join so DNF / backmarker drivers still appear; placed last
-    cum = all_drivers.merge(cum, on="DriverNumber", how="left")
-    cum["cumulative_time_s"] = cum["cumulative_time_s"].fillna(float("inf"))
-    cum.sort_values("cumulative_time_s", inplace=True)
+    cum = all_drivers.merge(as_of, on="DriverNumber", how="left")
+    cum["cumulative_time_s"] = cum["Time_s"].fillna(float("inf"))
+
+    # A driver has retired by this snapshot if they have no lap row at or
+    # beyond lap_number anywhere in the session (i.e. they never got there).
+    last_lap_by_driver = all_laps.groupby("DriverNumber")["LapNumber"].max()
+    cum["last_lap"] = cum["DriverNumber"].map(last_lap_by_driver).fillna(0).astype(int)
+    cum["retired"] = cum["last_lap"] < lap_number
+
+    # Running order first (by race time); retirees after, ranked by who got
+    # furthest (more elapsed session time at their last lap = further into
+    # the race), which is how real F1 classifies a DNF.
+    running = cum[~cum["retired"]].sort_values("cumulative_time_s", ascending=True)
+    retirees = cum[cum["retired"]].sort_values("cumulative_time_s", ascending=False)
+    cum = pd.concat([running, retirees], ignore_index=True)
     cum["position"] = range(1, len(cum) + 1)
 
-    leader_time = cum["cumulative_time_s"].iloc[0]
-    if leader_time == float("inf"):
+    leader_time = running["cumulative_time_s"].min() if len(running) else 0.0
+    if leader_time == float("inf") or pd.isna(leader_time):
         leader_time = 0.0
 
     # Merge with current-lap tyre/pit details (drop duplicate name cols first)
@@ -68,18 +98,23 @@ def _build_car_states(
     merged = cum.merge(lap_info, on="DriverNumber", how="left")
 
     cars: list[CarState] = []
-    driver_meta: dict[str, dict] = {}
     for _, row in merged.iterrows():
-        driver_meta[str(row["DriverNumber"])] = {
-            "driver_code": str(row.get("Driver", "UNK"))[:3].upper(),
-            "team": str(row.get("Team", "Unknown")),
-        }
+        retired = bool(row["retired"])
         raw_cum = row["cumulative_time_s"]
-        cum_s = float(raw_cum) if raw_cum != float("inf") else 0.0
-        raw_compound = (
-            str(row.get("Compound", "UNKNOWN")).upper()
-            if pd.notna(row.get("Compound")) else "UNKNOWN"
-        )
+        cum_s = float(raw_cum) if raw_cum != float("inf") and pd.notna(raw_cum) else 0.0
+
+        # Prefer this lap's own tyre data; fall back to the as-of snapshot —
+        # covers retirees and any driver missing an exact row at lap_number.
+        compound_val = row.get("Compound")
+        if pd.isna(compound_val):
+            compound_val = row.get("compound_asof")
+        tyre_life_val = row.get("TyreLife")
+        if pd.isna(tyre_life_val):
+            tyre_life_val = row.get("tyre_life_asof")
+
+        raw_compound = str(compound_val).upper() if pd.notna(compound_val) else "UNKNOWN"
+        is_in_pit_val = row.get("IsPitIn")
+
         state = CarState(
             car_id=int(row["DriverNumber"]),
             driver_code=str(row.get("Driver", "UNK"))[:3].upper(),
@@ -88,11 +123,15 @@ def _build_car_states(
             lap_number=lap_number,
             lap_time_s=float(row["LapTime_s"]) if pd.notna(row.get("LapTime_s")) else None,
             cumulative_time_s=cum_s,
-            gap_to_leader_s=round(cum_s - leader_time, 3) if cum_s > 0 else 0.0,
+            gap_to_leader_s=(
+                _RETIRED_GAP_SENTINEL if retired
+                else (round(cum_s - leader_time, 3) if cum_s > 0 else 0.0)
+            ),
             tire_compound=raw_compound if raw_compound in _VALID_COMPOUNDS else "UNKNOWN",
-            tire_age_laps=int(row["TyreLife"]) if pd.notna(row.get("TyreLife")) else 0,
-            is_in_pit=bool(row.get("IsPitIn", False)),
+            tire_age_laps=int(tyre_life_val) if pd.notna(tyre_life_val) else 0,
+            is_in_pit=(bool(is_in_pit_val) if pd.notna(is_in_pit_val) else False) and not retired,
             pit_count=_count_pit_stops(all_laps, str(row["DriverNumber"]), lap_number),
+            retired=retired,
         )
         cars.append(state)
 
