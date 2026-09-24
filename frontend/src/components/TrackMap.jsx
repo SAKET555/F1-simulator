@@ -57,8 +57,8 @@ export default function TrackMap({ raceId, cars = [], currentLap }) {
     <div className="flex items-center justify-center h-44 text-gray-600 text-sm">Loading track…</div>
   );
   if (!trackPoints.length) return (
-    <div className="flex items-center justify-center h-44 text-gray-600 text-xs">
-      Track map loads after telemetry is available
+    <div className="flex items-center justify-center h-44 text-gray-600 text-xs text-center px-6 leading-relaxed">
+      No telemetry archived for this session yet — the track map needs it to draw the circuit
     </div>
   );
 

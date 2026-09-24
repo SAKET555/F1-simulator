@@ -159,7 +159,15 @@ def load_qualifying_results(race_id: str) -> list[dict]:
         raise ValueError(f"Unknown race_id: {race_id!r}")
     try:
         session = fastf1.get_session(meta["year"], meta["round_number"], "Q")
-        session.load(telemetry=False, weather=False, messages=False)
+        # messages=True: when Ergast is unavailable (routinely — see the
+        # "Failed to load result data from Ergast!" warning FastF1 logs for
+        # almost every session in this environment), FastF1 falls back to
+        # calculating classification from lap times, but that fallback
+        # needs race control messages to know which laps were deleted.
+        # Without it, every driver comes back Position=NaN and Q1/Q2/Q3=NaT
+        # (which is exactly what the app was displaying: P99 for everyone,
+        # every time column blank).
+        session.load(telemetry=False, weather=False, messages=True)
         results = []
         if hasattr(session, "results") and session.results is not None and len(session.results) > 0:
             res = session.results

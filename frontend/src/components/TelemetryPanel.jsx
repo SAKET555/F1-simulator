@@ -10,6 +10,8 @@ export default function TelemetryPanel({ raceId, cars = [] }) {
   const [lapNumber, setLapNumber] = useState(1);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     if (cars.length > 0 && !selectedDriver) {
@@ -20,10 +22,12 @@ export default function TelemetryPanel({ raceId, cars = [] }) {
   function fetchTelemetry() {
     if (!raceId || !selectedDriver) return;
     setLoading(true);
+    setAttempted(true);
+    setError(false);
     fetch(`${API_BASE}/races/${raceId}/telemetry?driver=${selectedDriver}&lap=${lapNumber}`)
       .then(r => r.ok ? r.json() : Promise.reject(r.statusText))
       .then(d => { setData(d); setLoading(false); })
-      .catch(() => { setData(null); setLoading(false); });
+      .catch(() => { setData(null); setLoading(false); setError(true); });
   }
 
   const chartData = data?.points?.map(p => ({
@@ -68,8 +72,12 @@ export default function TelemetryPanel({ raceId, cars = [] }) {
       </div>
 
       {chartData.length === 0 ? (
-        <div className="flex items-center justify-center h-48 text-gray-600 text-sm">
-          Select a driver and lap then click Load
+        <div className="flex items-center justify-center h-48 text-gray-600 text-sm text-center px-6 leading-relaxed">
+          {!attempted
+            ? "Select a driver and lap then click Load"
+            : error
+              ? "Couldn't load telemetry for this session — it may not be archived yet (common for very recent events)"
+              : "No telemetry recorded for that driver on that lap — try another lap"}
         </div>
       ) : (
         <ResponsiveContainer width="100%" height={260}>

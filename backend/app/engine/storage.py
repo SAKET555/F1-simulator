@@ -63,13 +63,18 @@ def load(race_id: str) -> tuple[pd.DataFrame, int] | None:
 
 
 # ── generic keyed cache for the smaller per-query results ─────────────────
-# (telemetry, weather, sectors, qualifying). These previously only had an
-# in-memory @lru_cache, so anything beyond a handful of distinct queries —
-# or simply restarting the dev server — evicted them and forced a full
-# FastF1 re-fetch (measured 7-9s) even though the answer never changes for
-# a finished session. Persisting them the same way as the lap data makes
-# every one of those queries a disk read after the first time.
-EXTRA_CACHE_VERSION = 1
+# (telemetry, weather, sectors, qualifying, championship points). These
+# previously only had an in-memory @lru_cache, so anything beyond a handful
+# of distinct queries — or simply restarting the dev server — evicted them
+# and forced a full FastF1 re-fetch (measured 7-9s) even though the answer
+# never changes for a finished session. Persisting them the same way as the
+# lap data makes every one of those queries a disk read after the first
+# time. Bump this whenever a bug fix changes what a cached entry *means* —
+# e.g. v2 fixes qualifying (session.load(messages=False) meant FastF1
+# couldn't calculate quali classification without Ergast, so every driver
+# cached as Position=99/Q1-3=null) — so old, wrong entries are rebuilt
+# instead of silently keeping the bug alive forever.
+EXTRA_CACHE_VERSION = 2
 
 
 def _extra_path(key: str) -> Path:

@@ -332,7 +332,7 @@ export default function App() {
                   <QualifyingGrid raceId={selectedRace?.race_id} />
                 </div>
                 <div className="bg-panel border border-border rounded-xl p-4">
-                  <ChampionshipPanel year={raceYear} />
+                  <ChampionshipPanel year={raceYear} raceId={selectedRace?.race_id} />
                 </div>
               </div>
             )}

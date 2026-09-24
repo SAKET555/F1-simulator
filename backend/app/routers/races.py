@@ -100,6 +100,21 @@ async def get_stints(race_id: str):
         raise HTTPException(status_code=503, detail=str(e))
 
 
+@router.get("/races/{race_id}/points")
+async def get_race_points(race_id: str):
+    """Points each driver scored in this race, plus the driver/constructor
+    standings immediately after it (not the season's final result)."""
+    if get_race_meta(race_id) is None:
+        raise HTTPException(status_code=404, detail=f"Race '{race_id}' not found")
+    try:
+        result = await asyncio.to_thread(champ_engine.get_race_points, race_id)
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=503, detail=f"Could not compute points for '{race_id}'")
+    return result
+
+
 @router.get("/championship/{year}/drivers")
 async def get_driver_championship(year: int):
     if year < 2018 or year > 2026:
