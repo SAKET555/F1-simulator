@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from typing import AsyncGenerator, Optional
 
@@ -75,11 +76,21 @@ def _build_car_states(
     cum = all_drivers.merge(as_of, on="DriverNumber", how="left")
     cum["cumulative_time_s"] = cum["Time_s"].fillna(float("inf"))
 
-    # A driver has retired by this snapshot if they have no lap row at or
-    # beyond lap_number anywhere in the session (i.e. they never got there).
+    # A driver who's a lap (or more) down still finishes the race — the
+    # leader takes the chequered flag first, so a lapped car's very last
+    # lap row is always short of `total_laps` even though they're a normal
+    # classified finisher, not a DNF. Using "no row at lap_number" alone to
+    # mean "retired" wrongly flagged every lapped car as a DNF (e.g. 2021
+    # Abu Dhabi showed only 11 finishers when 15 actually finished). Use the
+    # FIA's own classification rule instead: a car that completes at least
+    # 90% of the race distance is classified as a finisher regardless of how
+    # many laps down it ended up; only a car that falls short of that before
+    # lap_number is a genuine retirement.
+    total_laps = int(all_laps["LapNumber"].max())
+    finish_threshold = max(1, math.ceil(0.9 * total_laps))
     last_lap_by_driver = all_laps.groupby("DriverNumber")["LapNumber"].max()
     cum["last_lap"] = cum["DriverNumber"].map(last_lap_by_driver).fillna(0).astype(int)
-    cum["retired"] = cum["last_lap"] < lap_number
+    cum["retired"] = (cum["last_lap"] < lap_number) & (cum["last_lap"] < finish_threshold)
 
     # Running order first (by race time); retirees after, ranked by who got
     # furthest (more elapsed session time at their last lap = further into

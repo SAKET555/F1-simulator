@@ -60,3 +60,46 @@ def load(race_id: str) -> tuple[pd.DataFrame, int] | None:
         log.warning("Processed cache corrupt for %s (%s) — will re-fetch", race_id, exc)
         p.unlink(missing_ok=True)
         return None
+
+
+# ── generic keyed cache for the smaller per-query results ─────────────────
+# (telemetry, weather, sectors, qualifying). These previously only had an
+# in-memory @lru_cache, so anything beyond a handful of distinct queries —
+# or simply restarting the dev server — evicted them and forced a full
+# FastF1 re-fetch (measured 7-9s) even though the answer never changes for
+# a finished session. Persisting them the same way as the lap data makes
+# every one of those queries a disk read after the first time.
+EXTRA_CACHE_VERSION = 1
+
+
+def _extra_path(key: str) -> Path:
+    from app.core.config import settings
+    # Query params (driver codes etc.) become part of `key`, so keep it
+    # filesystem-safe rather than assuming callers already sanitised it.
+    safe_key = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    return Path(settings.cache_dir) / "processed" / "extra" / f"{safe_key}.pkl"
+
+
+def save_extra(key: str, value) -> None:
+    p = _extra_path(key)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "wb") as fh:
+        pickle.dump({"value": value, "version": EXTRA_CACHE_VERSION}, fh,
+                    protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_extra(key: str):
+    """Returns the cached value, or None on a miss/corrupt/stale entry."""
+    p = _extra_path(key)
+    if not p.exists():
+        return None
+    try:
+        with open(p, "rb") as fh:
+            data = pickle.load(fh)
+        if data.get("version") != EXTRA_CACHE_VERSION:
+            return None
+        return data["value"]
+    except Exception as exc:
+        log.warning("Extra cache corrupt for %s (%s) — will re-fetch", key, exc)
+        p.unlink(missing_ok=True)
+        return None

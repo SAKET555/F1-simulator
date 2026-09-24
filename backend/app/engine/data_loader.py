@@ -147,6 +147,12 @@ def load_session_laps(race_id: str) -> tuple[pd.DataFrame, int]:
 @lru_cache(maxsize=8)
 def load_qualifying_results(race_id: str) -> list[dict]:
     """Return qualifying results sorted by grid position."""
+    from app.engine import storage
+    cache_key = f"{race_id}_qualifying"
+    cached = storage.load_extra(cache_key)
+    if cached is not None:
+        return cached
+
     _ensure_cache_dir()
     meta = get_race_meta(race_id)
     if meta is None:
@@ -174,7 +180,9 @@ def load_qualifying_results(race_id: str) -> list[dict]:
                     "q2_s": q2.total_seconds() if pd.notna(q2) and hasattr(q2, "total_seconds") else None,
                     "q3_s": q3.total_seconds() if pd.notna(q3) and hasattr(q3, "total_seconds") else None,
                 })
-            return sorted(results, key=lambda r: r["position"])
+            sorted_results = sorted(results, key=lambda r: r["position"])
+            storage.save_extra(cache_key, sorted_results)
+            return sorted_results
         return []
     except Exception as e:
         log.warning("Could not load qualifying for %s: %s", race_id, e)
@@ -189,28 +197,29 @@ def load_gap_history(race_id: str) -> dict:
     all_drivers = laps_df["Driver"].dropna().unique().tolist()
     lap_numbers = sorted(laps_df["LapNumber"].unique())
 
-    cum_times: dict[str, dict[int, float]] = {d: {} for d in all_drivers}
-
-    for drv in all_drivers:
-        drv_laps = laps_df[laps_df["Driver"] == drv].sort_values("LapNumber")
-        cumulative = 0.0
-        for _, row in drv_laps.iterrows():
-            lt = row["LapTime_s"]
-            if pd.notna(lt) and lt > 0:
-                cumulative += lt
-                cum_times[drv][int(row["LapNumber"])] = cumulative
+    # Gap-to-leader for a given lap comes straight from FastF1's own
+    # cumulative Time_s at that lap (see the identical fix and full
+    # explanation in replay.py's _build_car_states) rather than re-deriving
+    # it by summing LapTime_s: the opening lap has no LapTime (no previous
+    # lap to diff against), so summing silently drops each driver's own,
+    # differing, opening-lap duration — and, separately, any lap whose
+    # LapTime_s happens to include a red-flag/stoppage duration inflates
+    # every driver's gap from that lap onward. Time_s isn't affected by
+    # either problem.
+    pivot = laps_df.pivot_table(index="LapNumber", columns="Driver", values="Time_s", aggfunc="first")
 
     gaps_matrix = []
     for lap in lap_numbers:
-        times_this_lap = {drv: cum_times[drv][lap] for drv in all_drivers if lap in cum_times[drv]}
-        if not times_this_lap:
+        row = pivot.loc[lap] if lap in pivot.index else None
+        valid = row.dropna() if row is not None else None
+        if valid is None or valid.empty:
             gaps_matrix.append([-1.0] * len(all_drivers))
             continue
-        leader_time = min(times_this_lap.values())
+        leader_time = valid.min()
         row_gaps = []
         for drv in all_drivers:
-            t = times_this_lap.get(drv)
-            row_gaps.append(round(t - leader_time, 3) if t is not None else -1.0)
+            t = row.get(drv)
+            row_gaps.append(round(t - leader_time, 3) if pd.notna(t) else -1.0)
         gaps_matrix.append(row_gaps)
 
     return {
@@ -223,6 +232,12 @@ def load_gap_history(race_id: str) -> dict:
 @lru_cache(maxsize=8)
 def load_sector_times(race_id: str, driver_code: str) -> list[dict]:
     """Return sector times per lap for a specific driver."""
+    from app.engine import storage
+    cache_key = f"{race_id}_sectors_{driver_code}"
+    cached = storage.load_extra(cache_key)
+    if cached is not None:
+        return cached
+
     _ensure_cache_dir()
     meta = get_race_meta(race_id)
     if meta is None:
@@ -242,7 +257,9 @@ def load_sector_times(race_id: str, driver_code: str) -> list[dict]:
                 "s2_s": s2.total_seconds() if pd.notna(s2) and hasattr(s2, "total_seconds") else None,
                 "s3_s": s3.total_seconds() if pd.notna(s3) and hasattr(s3, "total_seconds") else None,
             })
-        return sorted(results, key=lambda r: r["lap"])
+        sorted_results = sorted(results, key=lambda r: r["lap"])
+        storage.save_extra(cache_key, sorted_results)
+        return sorted_results
     except Exception as e:
         log.warning("Could not load sector times for %s %s: %s", race_id, driver_code, e)
         return []
@@ -251,6 +268,15 @@ def load_sector_times(race_id: str, driver_code: str) -> list[dict]:
 @lru_cache(maxsize=4)
 def load_telemetry(race_id: str, driver_code: str, lap_number: int) -> list[dict]:
     """Return car telemetry for a specific driver lap."""
+    from app.engine import storage
+    # By far the slowest of these calls — a full telemetry load re-fetches
+    # everything for the whole session (session.load(telemetry=True) isn't
+    # scoped to one driver/lap), so persisting the result matters most here.
+    cache_key = f"{race_id}_telemetry_{driver_code}_{lap_number}"
+    cached = storage.load_extra(cache_key)
+    if cached is not None:
+        return cached
+
     _ensure_cache_dir()
     meta = get_race_meta(race_id)
     if meta is None:
@@ -277,6 +303,7 @@ def load_telemetry(race_id: str, driver_code: str, lap_number: int) -> list[dict
                 "x": float(row.get("X", 0) or 0),
                 "y": float(row.get("Y", 0) or 0),
             })
+        storage.save_extra(cache_key, points)
         return points
     except Exception as e:
         log.warning("Could not load telemetry for %s %s lap %d: %s", race_id, driver_code, lap_number, e)
@@ -286,6 +313,12 @@ def load_telemetry(race_id: str, driver_code: str, lap_number: int) -> list[dict
 @lru_cache(maxsize=8)
 def load_weather_data(race_id: str) -> list[dict]:
     """Return weather data sampled per approximate lap."""
+    from app.engine import storage
+    cache_key = f"{race_id}_weather"
+    cached = storage.load_extra(cache_key)
+    if cached is not None:
+        return cached
+
     _ensure_cache_dir()
     meta = get_race_meta(race_id)
     if meta is None:
@@ -313,7 +346,9 @@ def load_weather_data(race_id: str) -> list[dict]:
         by_lap: dict[int, dict] = {}
         for r in results:
             by_lap[r["lap"]] = r
-        return [by_lap[l] for l in sorted(by_lap.keys())]
+        frames = [by_lap[l] for l in sorted(by_lap.keys())]
+        storage.save_extra(cache_key, frames)
+        return frames
     except Exception as e:
         log.warning("Could not load weather for %s: %s", race_id, e)
         return []

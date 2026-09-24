@@ -9,10 +9,27 @@ function normalize(points, w, h, padding = 20) {
   const minY = Math.min(...ys), maxY = Math.max(...ys);
   const rangeX = maxX - minX || 1;
   const rangeY = maxY - minY || 1;
+
+  // A single, uniform scale for both axes — not one scale per axis. Scaling
+  // x and y independently stretches/squashes the shape to fit the box's
+  // aspect ratio, which is almost never the real circuit's aspect ratio, so
+  // the "track" ends up looking nothing like the real layout. One shared
+  // scale (the tighter of the two) preserves the actual shape; the result
+  // is then centered in the remaining space instead of hugging one corner.
+  const availW = w - 2 * padding;
+  const availH = h - 2 * padding;
+  const scale = Math.min(availW / rangeX, availH / rangeY);
+  const drawnW = rangeX * scale;
+  const drawnH = rangeY * scale;
+  const offsetX = padding + (availW - drawnW) / 2;
+  const offsetY = padding + (availH - drawnH) / 2;
+
   return points.map(p => ({
     ...p,
-    nx: padding + ((p.x - minX) / rangeX) * (w - 2 * padding),
-    ny: padding + ((p.y - minY) / rangeY) * (h - 2 * padding),
+    nx: offsetX + (p.x - minX) * scale,
+    // SVG y grows downward; track telemetry y typically doesn't, so flip it
+    // rather than rendering the circuit mirrored top-to-bottom.
+    ny: offsetY + (maxY - p.y) * scale,
   }));
 }
 
@@ -70,7 +87,12 @@ export default function TrackMap({ raceId, cars = [], currentLap }) {
           return (
             <g key={car.car_id}>
               <circle cx={pt.nx} cy={pt.ny} r={5} fill={idx === 0 ? "#e10600" : "#fff"} opacity={0.9} />
-              <text x={pt.nx + 6} y={pt.ny + 3} fontSize={7} fill="#ccc">{car.driver_code}</text>
+              {/* Stroked "halo" behind the initials so they stay legible over
+                  the track line and other cars regardless of what's underneath. */}
+              <text x={pt.nx + 7} y={pt.ny + 3} fontSize={9} fontWeight={700}
+                stroke="#0b0d13" strokeWidth={3} paintOrder="stroke" fill="#fff">
+                {car.driver_code}
+              </text>
             </g>
           );
         })}

@@ -43,9 +43,15 @@ export default function WinProbabilityChart({ predictions }) {
             tick={{ fill: "#6b7280", fontSize: 10 }}
             tickFormatter={(v) => `${v}%`}
           />
+          {/* interval={0}: without it, Recharts guesses which category ticks
+              would overlap and silently drops the rest — including, at one
+              point, row 0 (the actual leader), which is exactly the name
+              this chart most needs to show. The chart is sized with plenty
+              of room per row, so force every tick to render. */}
           <YAxis
             type="category"
             dataKey="name"
+            interval={0}
             tick={{ fill: "#d1d5db", fontSize: 11, fontWeight: 700 }}
             width={34}
           />
@@ -54,7 +60,11 @@ export default function WinProbabilityChart({ predictions }) {
             contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 6, fontSize: 12 }}
             labelStyle={{ color: "#fff" }}
           />
-          <Bar dataKey="win" name="Win" radius={[0, 4, 4, 0]}>
+          {/* Animation off: this chart re-sorts by win% on every lap tick, so
+              Recharts' default row-index-based tween would otherwise animate
+              a row's bar from its *previous* occupant's width to the new
+              one, flashing an oversized, momentarily-unlabeled bar. */}
+          <Bar dataKey="win" name="Win" radius={[0, 4, 4, 0]} isAnimationActive={false}>
             {data.map((entry, i) => (
               <Cell key={entry.car_id} fill={COLORS[i % COLORS.length]} />
             ))}

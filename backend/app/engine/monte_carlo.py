@@ -46,6 +46,29 @@ BASE_PACE: dict[str, float] = {
 # Gaussian noise std-dev per lap (models driver inconsistency + traffic)
 LAP_NOISE_STD: float = 0.25   # seconds
 
+# Roughly how long a compound's tyre life lasts before a stop becomes
+# necessary (laps), used only to schedule *future* pit stops inside the
+# simulation — real target stint lengths vary by circuit/strategy, so each
+# simulated car draws its own target with jitter (see STINT_LENGTH_JITTER_STD)
+# rather than every car pitting on exactly the same lap.
+STINT_LENGTH_LAPS: dict[str, float] = {
+    "SOFT":         20.0,
+    "MEDIUM":       30.0,
+    "HARD":         40.0,
+    "INTERMEDIATE": 25.0,
+    "WET":          30.0,
+    "UNKNOWN":      30.0,
+}
+STINT_LENGTH_JITTER_STD: float = 4.0   # laps
+MIN_STINT_LENGTH_LAPS: float = 8.0
+
+# Compound a simulated car switches onto for every pit stop *within* the
+# rollout (its first stint keeps whatever compound it's actually on). This
+# is a simplification — real strategy varies — but a fixed, durable target
+# compound is what stops the simulation from ever needing to guess a whole
+# multi-compound strategy tree while still forcing stops to happen at all.
+_ROLLOUT_PIT_COMPOUND = "HARD"
+
 # Pit stop time loss (seconds) keyed by circuit substring
 PIT_LOSS_BY_CIRCUIT: dict[str, float] = {
     "monza":      22.0,
@@ -126,14 +149,32 @@ def simulate_race(
 
     # ── Broadcast to (n_simulations, n_cars) ────────────────────────────────
     cum_matrix  = np.tile(cum_times,  (n_simulations, 1))   # (S, C)
-    age_matrix  = np.tile(tire_ages,  (n_simulations, 1))
-    deg_matrix  = np.tile(deg_rates,  (n_simulations, 1))
-    pace_matrix = np.tile(base_paces, (n_simulations, 1))
+    deg_matrix  = np.tile(deg_rates,  (n_simulations, 1))   # current compound's degradation rate — changes on a pit
+    pace_matrix = np.tile(base_paces, (n_simulations, 1))   # current compound's base pace — changes on a pit
+    age_matrix  = np.tile(tire_ages,  (n_simulations, 1))   # current tyre age — increments each lap, resets on a pit
 
-    # Roll forward each lap
-    for lap_offset in range(remaining_laps):
-        # Degradation penalty grows with tyre age
-        deg_penalty = deg_matrix * (age_matrix + lap_offset)
+    pit_deg  = DEGRADATION[_ROLLOUT_PIT_COMPOUND]
+    pit_pace = BASE_PACE[_ROLLOUT_PIT_COMPOUND]
+    pit_stint_len = STINT_LENGTH_LAPS[_ROLLOUT_PIT_COMPOUND]
+
+    # Each car's current stint has its own target length (with jitter) at
+    # which it pits again during the rollout — otherwise every simulated car
+    # on a given compound would pit on exactly the same lap.
+    base_stint_len = np.array([STINT_LENGTH_LAPS.get(cp, 30.0) for cp in compounds])
+    stint_target = np.tile(base_stint_len, (n_simulations, 1)) + rng.normal(
+        0.0, STINT_LENGTH_JITTER_STD, (n_simulations, n_cars)
+    )
+    stint_target = np.maximum(stint_target, MIN_STINT_LENGTH_LAPS)
+
+    # Roll forward each lap. Tyre age is tracked as real per-lap state (not
+    # `starting_age + lap_offset`, which would mean the car NEVER pits again
+    # for the rest of the race) so a stop actually happens once a car's
+    # current stint passes its target length — without this, a compound
+    # with a flatter degradation curve just keeps "winning" the fantasy of
+    # an ever-lengthening single stint, however far behind it really is.
+    for _ in range(remaining_laps):
+        age_matrix += 1.0
+        deg_penalty = deg_matrix * age_matrix
 
         # Gaussian noise
         noise = rng.normal(0.0, LAP_NOISE_STD, (n_simulations, n_cars))
@@ -143,11 +184,23 @@ def simulate_race(
         sc_loss  = rng.uniform(15, 30, n_simulations) * sc_event
         sc_loss  = sc_loss[:, np.newaxis]  # broadcast over cars
 
-        # Lap time = base_pace + degradation + noise
+        # A car pits this lap if its current stint has run past its target.
+        pit_mask = age_matrix >= stint_target
+
+        # Lap time = base_pace + degradation + noise (+ pit-lane loss if pitting)
         lap_time = 90.0 + pace_matrix + deg_penalty + noise + sc_loss
+        lap_time = np.where(pit_mask, lap_time + pit_loss, lap_time)
         lap_time = np.maximum(lap_time, 60.0)   # floor (safety car stints)
 
         cum_matrix += lap_time
+
+        # Reset state for cars that pitted: fresh tyre, new compound, and a
+        # freshly-jittered target for their next stint.
+        age_matrix  = np.where(pit_mask, 0.0, age_matrix)
+        deg_matrix  = np.where(pit_mask, pit_deg, deg_matrix)
+        pace_matrix = np.where(pit_mask, pit_pace, pace_matrix)
+        new_target = pit_stint_len + rng.normal(0.0, STINT_LENGTH_JITTER_STD, (n_simulations, n_cars))
+        stint_target = np.where(pit_mask, np.maximum(new_target, MIN_STINT_LENGTH_LAPS), stint_target)
 
     # ── Resolve finishing positions ──────────────────────────────────────────
     # argsort each row: lower cumulative time → better position

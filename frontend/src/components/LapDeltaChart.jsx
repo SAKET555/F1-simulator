@@ -20,13 +20,19 @@ export default function LapDeltaChart({ cars = [] }) {
         <BarChart data={data} layout="vertical" margin={{ top: 0, right: 30, left: 30, bottom: 0 }}>
           <XAxis type="number" domain={[fastest - 1, fastest + 5]}
             tick={{ fill: "#888", fontSize: 9 }} tickFormatter={v => `${v.toFixed(1)}s`} />
-          <YAxis type="category" dataKey="driver" tick={{ fill: "#ccc", fontSize: 10 }} width={28} />
+          {/* interval={0}: force every driver's tick to render — see
+              WinProbabilityChart for why Recharts' default can't be trusted
+              not to silently drop rows on a category axis. */}
+          <YAxis type="category" dataKey="driver" interval={0} tick={{ fill: "#ccc", fontSize: 10 }} width={28} />
           <Tooltip
             contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 8, fontSize: 10 }}
             formatter={(val) => [`${val.toFixed(3)}s`, "Lap time"]}
           />
           <ReferenceLine x={avg} stroke="#555" strokeDasharray="4 2" />
-          <Bar dataKey="time" radius={[0, 3, 3, 0]}>
+          {/* Animation off: rows re-sort by lap time every tick, and Recharts'
+              default tween would otherwise animate a row's bar between two
+              unrelated drivers' values as they swap position. */}
+          <Bar dataKey="time" radius={[0, 3, 3, 0]} isAnimationActive={false}>
             {data.map((d, i) => (
               <Cell key={d.driver} fill={i === 0 ? "#a855f7" : d.time <= avg ? "#22c55e" : "#e10600"} />
             ))}
