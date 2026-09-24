@@ -62,6 +62,50 @@ STINT_LENGTH_LAPS: dict[str, float] = {
 STINT_LENGTH_JITTER_STD: float = 4.0   # laps
 MIN_STINT_LENGTH_LAPS: float = 8.0
 
+# Per-race cache of stint-length targets actually observed in this race (see
+# _stint_targets_for_race). Tried calibrating DEGRADATION/BASE_PACE from
+# historical laps across cached races first — the regression came back with
+# *negative* degradation for SOFT and HARD even after removing the race-wide
+# fuel-burn/track-evolution trend, i.e. physically backwards, because 5
+# cached races isn't enough stint data to separate real degradation from
+# noise, traffic and per-circuit differences. Shipping that would have made
+# the model worse, not better, so those constants stay hand-picked. Stint
+# *length*, though, we don't need to infer statistically — every replayed
+# race already tells us, as ground truth, how long the field actually ran
+# each compound before pitting, so we use that directly instead of a
+# generic textbook assumption.
+_stint_target_cache: dict[str, dict[str, float]] = {}
+
+
+def _stint_targets_for_race(race_id: str) -> dict[str, float]:
+    """
+    Median completed-stint length per compound, observed in this specific
+    race. A driver's last stint in the data is excluded (it hasn't ended in
+    a pit stop — it's just wherever the replay currently is — so its length
+    isn't evidence of a "typical" stint, only "at least this long").
+    Compounds with fewer than 3 completed-stint observations in this race
+    fall back to STINT_LENGTH_LAPS.
+    """
+    if race_id in _stint_target_cache:
+        return _stint_target_cache[race_id]
+
+    targets = dict(STINT_LENGTH_LAPS)
+    try:
+        from app.engine.data_loader import load_stint_data
+        lengths_by_compound: dict[str, list[float]] = {}
+        for driver in load_stint_data(race_id):
+            completed = driver["stints"][:-1]   # drop the still-running final stint
+            for stint in completed:
+                lengths_by_compound.setdefault(stint["compound"], []).append(stint["laps"])
+        for compound, lengths in lengths_by_compound.items():
+            if len(lengths) >= 3 and compound in targets:
+                targets[compound] = float(np.median(lengths))
+    except Exception:
+        log.debug("Could not derive stint targets for %s — using defaults", race_id, exc_info=True)
+
+    _stint_target_cache[race_id] = targets
+    return targets
+
 # Compound a simulated car switches onto for every pit stop *within* the
 # rollout (its first stint keeps whatever compound it's actually on). This
 # is a simplification — real strategy varies — but a fixed, durable target
@@ -153,14 +197,20 @@ def simulate_race(
     pace_matrix = np.tile(base_paces, (n_simulations, 1))   # current compound's base pace — changes on a pit
     age_matrix  = np.tile(tire_ages,  (n_simulations, 1))   # current tyre age — increments each lap, resets on a pit
 
+    # Ground the assumed stint length in what the field actually did in this
+    # race so far, rather than a generic textbook figure — see
+    # _stint_targets_for_race for why we use real per-race ground truth here
+    # instead of trying to statistically infer it across races.
+    stint_lengths = _stint_targets_for_race(race_id)
+
     pit_deg  = DEGRADATION[_ROLLOUT_PIT_COMPOUND]
     pit_pace = BASE_PACE[_ROLLOUT_PIT_COMPOUND]
-    pit_stint_len = STINT_LENGTH_LAPS[_ROLLOUT_PIT_COMPOUND]
+    pit_stint_len = stint_lengths[_ROLLOUT_PIT_COMPOUND]
 
     # Each car's current stint has its own target length (with jitter) at
     # which it pits again during the rollout — otherwise every simulated car
     # on a given compound would pit on exactly the same lap.
-    base_stint_len = np.array([STINT_LENGTH_LAPS.get(cp, 30.0) for cp in compounds])
+    base_stint_len = np.array([stint_lengths.get(cp, 30.0) for cp in compounds])
     stint_target = np.tile(base_stint_len, (n_simulations, 1)) + rng.normal(
         0.0, STINT_LENGTH_JITTER_STD, (n_simulations, n_cars)
     )
