@@ -15,7 +15,8 @@ import GapChart            from "./components/GapChart";
 import LapDeltaChart       from "./components/LapDeltaChart";
 import TelemetryPanel      from "./components/TelemetryPanel";
 import SectorHeatmap       from "./components/SectorHeatmap";
-import TrackMap            from "./components/TrackMap";
+import CircuitImage        from "./components/CircuitImage";
+import AnalyticsPanel      from "./components/AnalyticsPanel";
 import UndercutCalc        from "./components/UndercutCalc";
 import StintAnalysis       from "./components/StintAnalysis";
 import QualifyingGrid      from "./components/QualifyingGrid";
@@ -23,7 +24,7 @@ import ChampionshipPanel   from "./components/ChampionshipPanel";
 import TeamRadio           from "./components/TeamRadio";
 import { Radio, Share2 }   from "lucide-react";
 
-const TABS = ["Overview", "Charts", "Telemetry", "Strategy", "Qualifying"];
+const TABS = ["Overview", "Charts", "Analytics", "Telemetry", "Strategy", "Qualifying"];
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState(null);
@@ -275,6 +276,11 @@ export default function App() {
               </div>
             )}
 
+            {/* ── ANALYTICS TAB ────────────────────────────────────────── */}
+            {activeTab === "Analytics" && (
+              <AnalyticsPanel raceId={selectedRace?.race_id} />
+            )}
+
             {/* ── TELEMETRY TAB ────────────────────────────────────────── */}
             {activeTab === "Telemetry" && (
               <div className="grid grid-cols-1 xl:grid-cols-[1fr_380px] gap-4">
@@ -292,7 +298,7 @@ export default function App() {
                 </div>
                 <div className="bg-panel border border-border rounded-xl p-4">
                   {selectedRace
-                    ? <TrackMap raceId={selectedRace.race_id} cars={cars} currentLap={lap ?? 1} />
+                    ? <CircuitImage raceId={selectedRace.race_id} />
                     : <p className="text-gray-600 text-sm">Historical races only</p>}
                 </div>
               </div>
