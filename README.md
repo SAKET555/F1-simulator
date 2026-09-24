@@ -44,3 +44,7 @@ Open http://localhost:5173
 - `WS /ws/race/{race_id}?speed=2` — replay stream
 - `WS /ws/live` — live timing stream
 - `POST /api/simulate/counterfactual` — strategy simulation
+
+## License
+
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for attribution.
