@@ -17,6 +17,11 @@ from app.schemas.race import CarState, RaceState
 
 log = logging.getLogger(__name__)
 
+# Guards against bad compound values already baked into older processed-cache
+# pickles (e.g. the literal string "NAN" instead of a real null) — anything
+# outside this set gets coerced to "UNKNOWN" rather than failing CarState.
+_VALID_COMPOUNDS = {"SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET", "UNKNOWN"}
+
 # Simulated real-world gap between laps when watching live (seconds).
 # At 1× speed we'd wait ~90 s per lap; we expose 2×/5×/10× multipliers.
 _BASE_LAP_INTERVAL_S: float = 5.0   # wall-clock seconds at 1× (demo-friendly)
@@ -71,6 +76,10 @@ def _build_car_states(
         }
         raw_cum = row["cumulative_time_s"]
         cum_s = float(raw_cum) if raw_cum != float("inf") else 0.0
+        raw_compound = (
+            str(row.get("Compound", "UNKNOWN")).upper()
+            if pd.notna(row.get("Compound")) else "UNKNOWN"
+        )
         state = CarState(
             car_id=int(row["DriverNumber"]),
             driver_code=str(row.get("Driver", "UNK"))[:3].upper(),
@@ -80,7 +89,7 @@ def _build_car_states(
             lap_time_s=float(row["LapTime_s"]) if pd.notna(row.get("LapTime_s")) else None,
             cumulative_time_s=cum_s,
             gap_to_leader_s=round(cum_s - leader_time, 3) if cum_s > 0 else 0.0,
-            tire_compound=str(row.get("Compound", "UNKNOWN")) if pd.notna(row.get("Compound")) else "UNKNOWN",
+            tire_compound=raw_compound if raw_compound in _VALID_COMPOUNDS else "UNKNOWN",
             tire_age_laps=int(row["TyreLife"]) if pd.notna(row.get("TyreLife")) else 0,
             is_in_pit=bool(row.get("IsPitIn", False)),
             pit_count=_count_pit_stops(all_laps, str(row["DriverNumber"]), lap_number),
@@ -108,7 +117,7 @@ async def replay_race(
     Async generator that yields RaceState objects lap by lap.
     Honors speed_multiplier (2, 5, 10) to throttle emission.
     """
-    laps_df, total_laps = load_session_laps(race_id)
+    laps_df, total_laps = await asyncio.to_thread(load_session_laps, race_id)
     meta = get_race_meta(race_id) or {}
     session_name = f"{meta.get('year', '')} {meta.get('event_name', race_id)}"
     interval = _BASE_LAP_INTERVAL_S / max(speed_multiplier, 0.1)

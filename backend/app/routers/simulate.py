@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from app.engine.data_loader import load_session_laps, get_race_meta
 from app.engine.monte_carlo import (
@@ -27,7 +29,7 @@ async def counterfactual(req: CounterfactualRequest):
         raise HTTPException(status_code=404, detail=f"Race '{req.race_id}' not found")
 
     try:
-        laps_df, total_laps = load_session_laps(req.race_id)
+        laps_df, total_laps = await asyncio.to_thread(load_session_laps, req.race_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Data load error: {exc}")
 
@@ -89,7 +91,7 @@ async def undercut_analysis(req: UndercutRequest):
     if get_race_meta(req.race_id) is None:
         raise HTTPException(status_code=404, detail=f"Race '{req.race_id}' not found")
     try:
-        laps_df, total_laps = load_session_laps(req.race_id)
+        laps_df, total_laps = await asyncio.to_thread(load_session_laps, req.race_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 
@@ -114,7 +116,7 @@ async def optimal_stop(req: OptimalStopRequest):
     if get_race_meta(req.race_id) is None:
         raise HTTPException(status_code=404, detail=f"Race '{req.race_id}' not found")
     try:
-        laps_df, _ = load_session_laps(req.race_id)
+        laps_df, _ = await asyncio.to_thread(load_session_laps, req.race_id)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=str(exc))
 

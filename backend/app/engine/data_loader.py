@@ -98,15 +98,23 @@ def load_session_laps(race_id: str) -> tuple[pd.DataFrame, int]:
     laps["LapNumber"] = laps["LapNumber"].astype(int)
     laps["LapTime_s"] = laps["LapTime"].dt.total_seconds()
 
+    # FastF1 sometimes leaves the literal string "nan" (not a real null) in
+    # this column, which .fillna() doesn't catch — it only slips through
+    # str.upper() as "NAN" and then fails CarState's tire_compound schema.
+    # Normalize by whitelist instead, so any unrecognized value (NaN, "nan",
+    # empty string, junk) safely falls back to "UNKNOWN".
     laps["Compound"] = (
         laps["Compound"]
         .fillna("UNKNOWN")
+        .astype(str)
         .str.upper()
         .replace({
             "HYPERSOFT": "SOFT", "ULTRASOFT": "SOFT",
             "SUPERSOFT": "SOFT", "SUPERHARD": "HARD",
         })
     )
+    _valid_compounds = {"SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET", "UNKNOWN"}
+    laps.loc[~laps["Compound"].isin(_valid_compounds), "Compound"] = "UNKNOWN"
     laps["IsPitOut"] = laps["PitOutTime"].notna()
     laps["IsPitIn"]  = laps["PitInTime"].notna()
     laps["TyreLife"] = laps["TyreLife"].fillna(0).astype(int)
