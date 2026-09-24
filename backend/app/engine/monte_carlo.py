@@ -154,13 +154,18 @@ def simulate_race(
     if not grid_state:
         return []
 
-    # Retired cars can't win or affect anyone else's finishing order — project
-    # win/podium chances only for cars still actually racing, and give
-    # retirees a flat 0%/0% at their already-classified (bottom-of-field)
-    # position instead of letting them roll forward through the rest of the
-    # race as if they were still on track.
-    active_state  = [c for c in grid_state if not c.retired]
-    retired_state = [c for c in grid_state if c.retired]
+    # Retired cars can't win or affect anyone else's finishing order, and a
+    # car a lap or more down realistically can't either (clawing back a
+    # whole lap in what's left of the race essentially never happens) —
+    # project win/podium chances only for cars still racing on the lead lap,
+    # and give retired/lapped cars a flat 0%/0% at their already-classified
+    # position instead. This also sidesteps a real problem: a lapped car's
+    # cumulative_time_s is deliberately its raw, un-projected last-known
+    # value (see _build_car_states for why projecting it is unreliable), so
+    # feeding it into the rollout as a normal starting time would understate
+    # how far behind it actually is and inflate its odds.
+    active_state     = [c for c in grid_state if not c.retired and c.laps_down == 0]
+    non_contending   = [c for c in grid_state if c.retired or c.laps_down > 0]
 
     remaining_laps = max(total_laps - current_lap, 0)
     if remaining_laps == 0 or not active_state:
@@ -271,7 +276,7 @@ def simulate_race(
                 expected_position=round(float(avg_pos[i]), 2),
             )
         )
-    for car in retired_state:
+    for car in non_contending:
         results.append(
             WinProbability(
                 car_id=car.car_id,

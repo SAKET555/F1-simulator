@@ -76,31 +76,49 @@ def _build_car_states(
     cum = all_drivers.merge(as_of, on="DriverNumber", how="left")
     cum["cumulative_time_s"] = cum["Time_s"].fillna(float("inf"))
 
-    # A driver who's a lap (or more) down still finishes the race — the
-    # leader takes the chequered flag first, so a lapped car's very last
-    # lap row is always short of `total_laps` even though they're a normal
-    # classified finisher, not a DNF. Using "no row at lap_number" alone to
-    # mean "retired" wrongly flagged every lapped car as a DNF (e.g. 2021
-    # Abu Dhabi showed only 11 finishers when 15 actually finished). Use the
+    # A driver a lap or more down has an `as_of_lap` short of `lap_number`,
+    # so their Time_s is a snapshot from *earlier* in the session than
+    # everyone still on the current lap. We do NOT try to project it forward
+    # to make it directly time-comparable to the lead lap: that requires
+    # guessing what happened in laps we have no data for, and if a safety
+    # car or red flag fell in exactly that gap (which it did the one time
+    # this was tried, on the exact race this logic was built against — 2021
+    # Abu Dhabi), the guess is confidently wrong regardless of how the pace
+    # estimate is built. Real F1 timing sidesteps this the same way: a
+    # lapped car shows "+1 LAP", not a time gap. So: rank primarily by
+    # `laps_down` (how current a car's data is), and only use time as a
+    # tiebreaker *within* the same laps_down bucket, where it's a fair,
+    # like-for-like comparison.
+    total_laps = int(all_laps["LapNumber"].max())
+    cum["laps_down"] = (lap_number - cum["as_of_lap"]).clip(lower=0).fillna(0).astype(int)
+
+    # A driver who's a lap or more down can still finish the race — the
+    # leader takes the chequered flag first, so a lapped car's last lap row
+    # is always short of `total_laps` even though it's a normal classified
+    # finisher, not a DNF. Using "no row at lap_number" alone to mean
+    # "retired" wrongly flagged every lapped car as a DNF (e.g. 2021 Abu
+    # Dhabi showed only 11 finishers when 15 actually finished). Use the
     # FIA's own classification rule instead: a car that completes at least
     # 90% of the race distance is classified as a finisher regardless of how
     # many laps down it ended up; only a car that falls short of that before
     # lap_number is a genuine retirement.
-    total_laps = int(all_laps["LapNumber"].max())
     finish_threshold = max(1, math.ceil(0.9 * total_laps))
     last_lap_by_driver = all_laps.groupby("DriverNumber")["LapNumber"].max()
     cum["last_lap"] = cum["DriverNumber"].map(last_lap_by_driver).fillna(0).astype(int)
     cum["retired"] = (cum["last_lap"] < lap_number) & (cum["last_lap"] < finish_threshold)
 
-    # Running order first (by race time); retirees after, ranked by who got
-    # furthest (more elapsed session time at their last lap = further into
-    # the race), which is how real F1 classifies a DNF.
-    running = cum[~cum["retired"]].sort_values("cumulative_time_s", ascending=True)
+    # Running order first — by laps_down, then by time within the same
+    # laps_down bucket (this is where being "on the lead lap" with
+    # laps_down=0 for every currently-racing car makes the sort a normal,
+    # fair time-based leaderboard again). Retirees after, ranked by who got
+    # furthest, which is how real F1 classifies a DNF.
+    running = cum[~cum["retired"]].sort_values(["laps_down", "cumulative_time_s"], ascending=[True, True])
     retirees = cum[cum["retired"]].sort_values("cumulative_time_s", ascending=False)
     cum = pd.concat([running, retirees], ignore_index=True)
     cum["position"] = range(1, len(cum) + 1)
 
-    leader_time = running["cumulative_time_s"].min() if len(running) else 0.0
+    on_lead_lap = running[running["laps_down"] == 0]
+    leader_time = on_lead_lap["cumulative_time_s"].min() if len(on_lead_lap) else 0.0
     if leader_time == float("inf") or pd.isna(leader_time):
         leader_time = 0.0
 
@@ -125,6 +143,18 @@ def _build_car_states(
 
         raw_compound = str(compound_val).upper() if pd.notna(compound_val) else "UNKNOWN"
         is_in_pit_val = row.get("IsPitIn")
+        laps_down = int(row["laps_down"])
+
+        # A meaningful *time* gap only exists between cars on the same lap —
+        # once a car is a lap or more behind, "gap" stops being a time
+        # question and becomes a laps question (laps_down, above), same as
+        # a real F1 timing screen switches from "+12.4s" to "+1 LAP". The
+        # sentinel here just means "not a valid time gap, don't display it
+        # as one" — the frontend keys off retired/laps_down first.
+        if retired or laps_down > 0:
+            gap = _RETIRED_GAP_SENTINEL
+        else:
+            gap = round(cum_s - leader_time, 3) if cum_s > 0 else 0.0
 
         state = CarState(
             car_id=int(row["DriverNumber"]),
@@ -134,15 +164,13 @@ def _build_car_states(
             lap_number=lap_number,
             lap_time_s=float(row["LapTime_s"]) if pd.notna(row.get("LapTime_s")) else None,
             cumulative_time_s=cum_s,
-            gap_to_leader_s=(
-                _RETIRED_GAP_SENTINEL if retired
-                else (round(cum_s - leader_time, 3) if cum_s > 0 else 0.0)
-            ),
+            gap_to_leader_s=gap,
             tire_compound=raw_compound if raw_compound in _VALID_COMPOUNDS else "UNKNOWN",
             tire_age_laps=int(tyre_life_val) if pd.notna(tyre_life_val) else 0,
             is_in_pit=(bool(is_in_pit_val) if pd.notna(is_in_pit_val) else False) and not retired,
             pit_count=_count_pit_stops(all_laps, str(row["DriverNumber"]), lap_number),
             retired=retired,
+            laps_down=laps_down,
         )
         cars.append(state)
 

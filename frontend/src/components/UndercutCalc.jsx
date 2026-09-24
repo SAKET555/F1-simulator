@@ -32,7 +32,9 @@ export default function UndercutCalc({ raceId, cars = [], currentLap = 1, totalL
     setLoading(false);
   }
 
-  const activeCars = cars.filter(c => c.gap_to_leader_s < 200);
+  // Retired/lapped cars send a sentinel gap (not a real time), and undercut
+  // math needs a genuine, comparable time gap between the two cars.
+  const activeCars = cars.filter(c => !c.retired && !c.laps_down);
 
   return (
     <div>

@@ -2,8 +2,13 @@ import { useState, useEffect, useRef } from "react";
 import TireBadge from "./TireBadge";
 import { getTeamColor } from "../lib/constants";
 
-function GapDisplay({ gap, retired }) {
-  if (retired || gap === Infinity || gap > 9999) return <span className="text-gray-600 font-bold text-xs">DNF</span>;
+function GapDisplay({ gap, retired, lapsDown }) {
+  if (retired) return <span className="text-gray-600 font-bold text-xs">DNF</span>;
+  // A car a lap or more behind isn't meaningfully comparable by time (that's
+  // why the backend sends a sentinel instead of a real number here) — show
+  // it the way a real F1 timing screen does, as laps rather than seconds.
+  if (lapsDown > 0) return <span className="text-gray-400 text-xs">+{lapsDown} LAP{lapsDown > 1 ? "S" : ""}</span>;
+  if (gap === Infinity || gap > 9999) return <span className="text-gray-600 font-bold text-xs">DNF</span>;
   if (gap === 0) return <span className="text-f1red font-bold text-xs">LEAD</span>;
   return <span className="text-gray-300 text-xs">+{gap.toFixed(3)}s</span>;
 }
@@ -56,7 +61,7 @@ export default function Leaderboard({ cars = [], lap, totalLaps }) {
             <div
               key={car.car_id}
               className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm transition-colors
-                ${car.retired ? "opacity-50" : idx === 0 ? "bg-panel border border-f1red/30" : "bg-panel/60 hover:bg-panel"}`}
+                ${car.retired ? "opacity-50" : car.laps_down > 0 ? "opacity-75" : idx === 0 ? "bg-panel border border-f1red/30" : "bg-panel/60 hover:bg-panel"}`}
               style={{ borderLeft: `3px solid ${teamColor}` }}
             >
               {/* Position */}
@@ -99,7 +104,7 @@ export default function Leaderboard({ cars = [], lap, totalLaps }) {
 
               {/* Gap */}
               <div className="flex-1 text-right">
-                <GapDisplay gap={car.gap_to_leader_s} retired={car.retired} />
+                <GapDisplay gap={car.gap_to_leader_s} retired={car.retired} lapsDown={car.laps_down} />
               </div>
 
               {/* Pit indicator */}

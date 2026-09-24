@@ -73,12 +73,14 @@ export default function TrackMap({ raceId, cars = [], currentLap }) {
         <path d={pathD} fill="none" stroke="#3a3d4a" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" />
         <path d={pathD} fill="none" stroke="#555" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
 
-        {cars.filter(c => !c.retired).slice(0, 10).map((car, idx) => {
+        {/* Cars a lap or more down don't have a real time gap to position
+            from (the backend sends a sentinel there deliberately — see
+            Leaderboard/_build_car_states for why), so there's no reliable
+            proxy for where they actually are on track; skip drawing them
+            rather than placing them somewhere meaningless. */}
+        {cars.filter(c => !c.retired && !c.laps_down).slice(0, 10).map((car, idx) => {
           // Approximate each car's point on the leader's lap trace from its
-          // gap to the leader, as a fraction of one lap. Gaps regularly
-          // exceed a single lap duration (backmarkers, lapped cars), so we
-          // wrap with modulo instead of clamping to 0 — clamping collapsed
-          // every car more than ~120s back onto the same point on track.
+          // gap to the leader, as a fraction of one lap.
           const lapDurationS = cars[0]?.lap_time_s || 90;
           const lapFraction = 1 - ((car.gap_to_leader_s % lapDurationS) / lapDurationS);
           const ptIdx = Math.floor(lapFraction * trackPoints.length) % trackPoints.length;

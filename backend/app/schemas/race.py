@@ -22,6 +22,7 @@ class CarState(BaseModel):
     speed_kmh: Optional[float] = None
     drs: bool = False
     retired: bool = False   # true once this car has no further lap data (DNF)
+    laps_down: int = 0      # 0 = on the lead lap; N = N laps behind at this snapshot
 
 
 class RaceState(BaseModel):
