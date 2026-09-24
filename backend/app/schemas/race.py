@@ -102,7 +102,7 @@ class TelemetryResponse(BaseModel):
 
 
 class QualifyingResult(BaseModel):
-    position: int
+    position: Optional[int] = None   # None = no laps recorded at all (DNS)
     driver_code: str
     team: str
     q1_s: Optional[float] = None

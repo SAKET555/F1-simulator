@@ -45,8 +45,10 @@ export default function QualifyingGrid({ raceId }) {
             </thead>
             <tbody>
               {results.map(r => (
-                <tr key={r.driver_code} className="border-b border-border/30 hover:bg-white/5">
-                  <td className="py-1 pr-2 text-gray-400">{r.position}</td>
+                <tr key={r.driver_code} className={`border-b border-border/30 hover:bg-white/5 ${r.position == null ? "opacity-50" : ""}`}>
+                  {/* null position = no laps recorded at all for this driver
+                      in the session (a real data gap, not a computed rank) */}
+                  <td className="py-1 pr-2 text-gray-400">{r.position ?? "DNS"}</td>
                   <td className="py-1 pr-2 font-bold text-white">{r.driver_code}</td>
                   <td className="py-1 pr-2 text-gray-500 truncate max-w-[80px]">{r.team}</td>
                   <td className={`py-1 pr-2 text-right font-mono ${r.q1_s ? "text-gray-300" : "text-gray-600"}`}>

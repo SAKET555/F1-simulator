@@ -176,10 +176,17 @@ def load_qualifying_results(race_id: str) -> list[dict]:
                 q2 = row.get("Q2")
                 q3 = row.get("Q3")
                 pos_val = row.get("Position")
+                # A driver with genuinely zero recorded laps in the session
+                # (crashed/withdrew before a timed lap — FastF1 itself logs
+                # "No lap data for driver X" for these) has no position to
+                # derive at all, not even via the lap-time fallback. Sending
+                # a placeholder number (previously 99) looked like a real,
+                # very-last-place classification; None/null says honestly
+                # "unknown", and the frontend shows it as DNS.
                 try:
-                    pos = int(pos_val) if pd.notna(pos_val) else 99
+                    pos = int(pos_val) if pd.notna(pos_val) else None
                 except (ValueError, TypeError):
-                    pos = 99
+                    pos = None
                 results.append({
                     "position": pos,
                     "driver_code": str(row.get("Abbreviation", "")),
@@ -188,7 +195,13 @@ def load_qualifying_results(race_id: str) -> list[dict]:
                     "q2_s": q2.total_seconds() if pd.notna(q2) and hasattr(q2, "total_seconds") else None,
                     "q3_s": q3.total_seconds() if pd.notna(q3) and hasattr(q3, "total_seconds") else None,
                 })
-            sorted_results = sorted(results, key=lambda r: r["position"])
+            # None (no laps at all — see above) sorts after every real
+            # position instead of crashing (None < None is also a TypeError,
+            # so the second tuple element must never be None either).
+            sorted_results = sorted(
+                results,
+                key=lambda r: (r["position"] is None, r["position"] or 0),
+            )
             storage.save_extra(cache_key, sorted_results)
             return sorted_results
         return []
@@ -215,25 +228,38 @@ def load_gap_history(race_id: str) -> dict:
     # every driver's gap from that lap onward. Time_s isn't affected by
     # either problem.
     pivot = laps_df.pivot_table(index="LapNumber", columns="Driver", values="Time_s", aggfunc="first")
+    lap_time_pivot = laps_df.pivot_table(index="LapNumber", columns="Driver", values="LapTime_s", aggfunc="first")
 
     gaps_matrix = []
+    lap_times_matrix = []
     for lap in lap_numbers:
         row = pivot.loc[lap] if lap in pivot.index else None
         valid = row.dropna() if row is not None else None
+        lt_row = lap_time_pivot.loc[lap] if lap in lap_time_pivot.index else None
+
         if valid is None or valid.empty:
             gaps_matrix.append([-1.0] * len(all_drivers))
-            continue
-        leader_time = valid.min()
-        row_gaps = []
-        for drv in all_drivers:
-            t = row.get(drv)
-            row_gaps.append(round(t - leader_time, 3) if pd.notna(t) else -1.0)
-        gaps_matrix.append(row_gaps)
+        else:
+            leader_time = valid.min()
+            gaps_matrix.append([
+                round(row.get(drv) - leader_time, 3) if pd.notna(row.get(drv)) else -1.0
+                for drv in all_drivers
+            ])
+
+        # A driver's actual lap time for that lap — e.g. an inflated gap
+        # from a long pit/repair stop reads very differently next to "lap
+        # time: 98.8s" (normal racing pace once back out) than it does on
+        # its own, where it just looks like a miscalculated number.
+        lap_times_matrix.append([
+            round(float(lt_row.get(drv)), 3) if lt_row is not None and pd.notna(lt_row.get(drv)) else None
+            for drv in all_drivers
+        ])
 
     return {
         "laps": [int(l) for l in lap_numbers],
         "drivers": list(all_drivers),
         "gaps_matrix": gaps_matrix,
+        "lap_times_matrix": lap_times_matrix,
     }
 
 
