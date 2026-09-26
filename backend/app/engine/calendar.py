@@ -2,7 +2,7 @@
 Dynamic race calendar builder.
 
 Uses FastF1's get_event_schedule() to fetch the full race calendar for
-each year in SUPPORTED_YEARS (2016-2026) and caches the result to
+each year in SUPPORTED_YEARS (2016-2026, except 2022) and caches the result to
 cache/calendar_cache.json.  On subsequent server starts the JSON is
 read instantly — no network call.
 
@@ -19,7 +19,11 @@ import fastf1
 
 log = logging.getLogger(__name__)
 
-SUPPORTED_YEARS: list[int] = list(range(2016, 2027))  # 2016 – 2026
+# 2022 is left out: F1's live-timing archive refuses every 2022 file
+# (HTTP 403 Access Denied, checked Sept 2026), so none of its races can be
+# loaded. Add it back here if that archive opens up again.
+UNAVAILABLE_YEARS: set[int] = {2022}
+SUPPORTED_YEARS: list[int] = [y for y in range(2016, 2027) if y not in UNAVAILABLE_YEARS]
 
 # Fallback lap counts for circuits where we don't get them from the schedule.
 CIRCUIT_LAPS: dict[str, int] = {
@@ -102,7 +106,7 @@ def build_catalogue(force_refresh: bool = False) -> list[dict]:
     if not force_refresh and cf.exists():
         try:
             cached = json.loads(cf.read_text(encoding="utf-8"))
-            races = cached.get("races", [])
+            races = [r for r in cached.get("races", []) if r["year"] in SUPPORTED_YEARS]
             if races:
                 log.info("Calendar: loaded %d races from %s", len(races), cf)
                 return races

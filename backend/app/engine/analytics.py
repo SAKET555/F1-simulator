@@ -224,8 +224,10 @@ def summary(race_id: str) -> dict:
     if gained:
         up = max(gained, key=gained.get)
         down = min(gained, key=gained.get)
-        cards.append({"label": "Most places gained", "value": f"{up} +{gained[up]}", "sub": "vs. position after lap 1"})
-        cards.append({"label": "Most places lost", "value": f"{down} {gained[down]:+d}", "sub": "vs. position after lap 1"})
+        if gained[up] > 0:
+            cards.append({"label": "Most places gained", "value": f"{up} +{gained[up]}", "sub": "vs. position after lap 1"})
+        if gained[down] < 0:
+            cards.append({"label": "Most places lost", "value": f"{down} {gained[down]:+d}", "sub": "vs. position after lap 1"})
     if fastest_pace is not None:
         cards.append({"label": "Best race pace", "value": fastest_pace,
                       "sub": f"median clean lap {_fmt_lap(float(median_pace[fastest_pace]))}"})

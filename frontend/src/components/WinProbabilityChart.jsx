@@ -56,7 +56,7 @@ export default function WinProbabilityChart({ predictions }) {
             width={34}
           />
           <Tooltip
-            formatter={(value, name) => [`${value.toFixed(1)}%`, name === "win" ? "Win" : "Podium"]}
+            formatter={(value, name) => [`${value.toFixed(1)}%`, name === "Win" ? "Win" : "Podium"]}
             contentStyle={{ background: "#1a1d27", border: "1px solid #2a2d3a", borderRadius: 6, fontSize: 12 }}
             labelStyle={{ color: "#fff" }}
           />
