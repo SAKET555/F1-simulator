@@ -297,7 +297,6 @@ apexsim/
 ├── README.md                 how to run
 ├── TECHNICAL.md              this file
 ├── LICENSE, NOTICE           Apache-2.0
-├── screenshot.png            picture used by the README
 ├── .gitignore                ignores cache/, .venv, node_modules, dist, .env
 ├── cache/                    generated; can be deleted at any time
 ├── backend/

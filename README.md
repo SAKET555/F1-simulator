@@ -5,8 +5,6 @@ while Monte Carlo simulations update every driver's win and podium chances, test
 45+ analyses per race: pace, consistency, strategy, tyres and race flow. There is also a zoomable circuit map that
 replays every driver's smoothed lap, and a local search box that answers questions about a season.
 
-![screenshot](screenshot.png)
-
 > Everything runs on your own machine. There are no accounts, no API keys, no paid services and no language model
 > involved. Race data comes from the free [FastF1](https://github.com/theOehrly/Fast-F1) library and is cached on
 > your disk after the first download.
