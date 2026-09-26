@@ -21,15 +21,12 @@ import UndercutCalc        from "./components/UndercutCalc";
 import StintAnalysis       from "./components/StintAnalysis";
 import QualifyingGrid      from "./components/QualifyingGrid";
 import ChampionshipPanel   from "./components/ChampionshipPanel";
-import TeamRadio           from "./components/TeamRadio";
-import { Radio, Share2 }   from "lucide-react";
+import { Share2 }          from "lucide-react";
 
 const TABS = ["Overview", "Charts", "Analytics", "Telemetry", "Strategy", "Qualifying"];
 
 export default function App() {
   const [selectedRace, setSelectedRace] = useState(null);
-  const [isLive,       setIsLive]       = useState(false);
-  const [liveSession,  setLiveSession]  = useState(null);
   const [speed,        setSpeedState]   = useState(2);
   const [paused,       setPaused]       = useState(false);
   const [activeTab,    setActiveTab]    = useState("Overview");
@@ -47,7 +44,6 @@ export default function App() {
   } = useRaceSocket(
     selectedRace?.race_id ?? null,
     speed,
-    isLive,
   );
 
   function handleSpeedChange(s) { setSpeedState(s); setSpeedRemote(s); }
@@ -56,16 +52,8 @@ export default function App() {
 
   function handleBack() {
     setSelectedRace(null);
-    setIsLive(false);
-    setLiveSession(null);
     setPaused(false);
     setActiveTab("Overview");
-  }
-
-  function handleLive(session) {
-    setSelectedRace(null);
-    setIsLive(true);
-    setLiveSession(session);
   }
 
   function handleShare() {
@@ -79,7 +67,7 @@ export default function App() {
     onResume: handleResume,
     onSpeedChange: handleSpeedChange,
     paused,
-    enabled: !!(selectedRace || isLive),
+    enabled: selectedRace !== null,
   });
 
   useShareableUrl({
@@ -96,9 +84,8 @@ export default function App() {
   const cars        = raceState?.cars       ?? [];
   const lap         = raceState?.lap        ?? null;
   const totalLaps   = raceState?.total_laps ?? selectedRace?.total_laps ?? 70;
-  const sessionName = raceState?.session_name
-    ?? (isLive ? "Live Session" : selectedRace?.event_name ?? "");
-  const inDashboard = selectedRace !== null || isLive;
+  const sessionName = raceState?.session_name ?? selectedRace?.event_name ?? "";
+  const inDashboard = selectedRace !== null;
   const raceYear    = selectedRace?.year ?? new Date().getFullYear();
 
   return (
@@ -113,17 +100,12 @@ export default function App() {
             <>
               <span className="text-gray-600 mx-1 hidden sm:inline">/</span>
               <span className="text-gray-400 text-sm truncate hidden sm:inline">{sessionName}</span>
-              {isLive && (
-                <span className="flex items-center gap-1 text-[11px] font-bold text-red-400 bg-red-500/10 px-2 py-0.5 rounded-full flex-shrink-0">
-                  <Radio size={10} className="animate-pulse" /> LIVE
-                </span>
-              )}
             </>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
-          {inDashboard && !isLive && (
+          {inDashboard && (
             <SpeedControl
               speed={speed}
               onSpeedChange={handleSpeedChange}
@@ -132,15 +114,6 @@ export default function App() {
               onResume={handleResume}
               status={status}
             />
-          )}
-          {isLive && (
-            <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-              status === "live" ? "bg-green-600/20 text-green-400 animate-pulse" :
-              status === "error" ? "bg-red-600/20 text-red-400" :
-              "bg-gray-600/20 text-gray-400"
-            }`}>
-              {status.toUpperCase()}
-            </span>
           )}
           {inDashboard && (
             <button onClick={handleShare}
@@ -180,7 +153,7 @@ export default function App() {
       {/* ── Body ─────────────────────────────────────────────────────────── */}
       <main className="flex-1 p-4 md:p-5">
         {!inDashboard ? (
-          <RaceSelector onSelect={setSelectedRace} onLive={handleLive} />
+          <RaceSelector onSelect={setSelectedRace} />
         ) : (
           <>
             {infoMsg && (
@@ -248,16 +221,12 @@ export default function App() {
                 </div>
 
                 <div className="bg-panel border border-border rounded-xl p-4">
-                  {isLive ? (
-                    <TeamRadio isLive={isLive} sessionKey={liveSession?.session_key} />
-                  ) : (
-                    <CounterfactualPanel
-                      raceId={selectedRace?.race_id}
-                      cars={cars}
-                      totalLaps={totalLaps}
-                      currentLap={lap ?? 1}
-                    />
-                  )}
+                  <CounterfactualPanel
+                    raceId={selectedRace?.race_id}
+                    cars={cars}
+                    totalLaps={totalLaps}
+                    currentLap={lap ?? 1}
+                  />
                 </div>
               </div>
             )}
@@ -347,7 +316,7 @@ export default function App() {
       </main>
 
       <footer className="text-center text-xs text-gray-700 py-2 border-t border-border">
-        SAK Racing Sim · FastF1 + OpenF1 + Monte Carlo · {new Date().getFullYear()} · Space=pause · 2/5/0=speed
+        SAK Racing Sim · FastF1 + Monte Carlo · {new Date().getFullYear()} · Space=pause · 2/5/0=speed
       </footer>
     </div>
   );

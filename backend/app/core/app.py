@@ -9,7 +9,6 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.routers import analytics as analytics_router, races, simulate, ws
-from app.routers import live as live_router
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +53,6 @@ def create_app() -> FastAPI:
     app.include_router(simulate.router, prefix="/api")
     app.include_router(analytics_router.router, prefix="/api")
     app.include_router(ws.router)
-    app.include_router(live_router.router)   # live F1 endpoints
 
     @app.get("/api/health")
     async def health():

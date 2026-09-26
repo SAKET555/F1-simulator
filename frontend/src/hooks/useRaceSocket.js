@@ -2,13 +2,12 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { WS_BASE } from "../lib/constants";
 
 /**
- * useRaceSocket(raceId, speed, isLive)
+ * useRaceSocket(raceId, speed)
  *
- * raceId  – historical race id ("2023-r14") or null for live mode
- * speed   – replay speed multiplier (ignored in live mode)
- * isLive  – true → connect to /ws/live instead of /ws/race/{raceId}
+ * raceId  – historical race id ("2023-r14"); no connection while null
+ * speed   – replay speed multiplier
  */
-export function useRaceSocket(raceId, speed = 2, isLive = false) {
+export function useRaceSocket(raceId, speed = 2) {
   const wsRef      = useRef(null);
   const [raceState,   setRaceState]   = useState(null);
   const [predictions, setPredictions] = useState(null);
@@ -23,8 +22,7 @@ export function useRaceSocket(raceId, speed = 2, isLive = false) {
   }, []);
 
   useEffect(() => {
-    const shouldConnect = isLive || Boolean(raceId);
-    if (!shouldConnect) return;
+    if (!raceId) return;
 
     setStatus("connecting");
     setRaceState(null);
@@ -32,11 +30,7 @@ export function useRaceSocket(raceId, speed = 2, isLive = false) {
     setWinner(null);
     setInfoMsg(null);
 
-    const url = isLive
-      ? `${WS_BASE}/live`
-      : `${WS_BASE}/race/${raceId}?speed=${speed}`;
-
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(`${WS_BASE}/race/${raceId}?speed=${speed}`);
     wsRef.current = ws;
 
     ws.onopen = () => setStatus("live");
@@ -72,7 +66,7 @@ export function useRaceSocket(raceId, speed = 2, isLive = false) {
 
     return () => ws.close();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raceId, speed, isLive]);
+  }, [raceId, speed]);
 
   const pause          = useCallback(() => send({ type: "pause" }),  [send]);
   const resume         = useCallback(() => send({ type: "resume" }), [send]);

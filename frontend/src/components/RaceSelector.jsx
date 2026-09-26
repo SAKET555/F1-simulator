@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
-import { API_BASE, WS_BASE } from "../lib/constants";
-import { Clock, Radio } from "lucide-react";
+import { API_BASE } from "../lib/constants";
+import { Clock } from "lucide-react";
 
-export default function RaceSelector({ onSelect, onLive }) {
+export default function RaceSelector({ onSelect }) {
   const [races,        setRaces]        = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState(null);
-  const [season,       setSeason]       = useState("LIVE");
-  const [liveStatus,   setLiveStatus]   = useState(null);   // null | { live, session }
-  const [liveChecking, setLiveChecking] = useState(false);
+  const [season,       setSeason]       = useState(null);
   const [searchQuery,  setSearchQuery]  = useState("");
 
   // Load race catalogue
@@ -25,22 +23,11 @@ export default function RaceSelector({ onSelect, onLive }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Check live session when LIVE tab is selected
-  useEffect(() => {
-    if (season !== "LIVE") return;
-    setLiveChecking(true);
-    fetch(`${API_BASE}/live/session`)
-      .then((r) => r.json())
-      .then(setLiveStatus)
-      .catch(() => setLiveStatus({ live: false, session: null }))
-      .finally(() => setLiveChecking(false));
-  }, [season]);
-
   if (loading) return <p className="text-gray-500 text-sm p-6">Loading race library...</p>;
   if (error)   return <p className="text-red-400 text-sm p-6">{error}</p>;
 
   const years = [...new Set(races.map((r) => r.year))].sort((a, b) => b - a);
-  const seasonRaces = season !== "LIVE" ? races.filter((r) => r.year === Number(season)) : [];
+  const seasonRaces = races.filter((r) => r.year === season);
   const filtered = seasonRaces.filter(r =>
     !searchQuery ||
     r.circuit?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -55,25 +42,12 @@ export default function RaceSelector({ onSelect, onLive }) {
           <span className="text-f1red">SAK</span> RACING SIM
         </h1>
         <p className="text-xs text-gray-500 mt-1">
-          Select a race to replay, or go live during an active race weekend
+          Select a race to replay
         </p>
       </div>
 
-      {/* Season / Live tabs */}
+      {/* Season tabs */}
       <div className="flex gap-1 flex-wrap">
-        {/* Live tab */}
-        <button
-          onClick={() => setSeason("LIVE")}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-bold transition-colors ${
-            season === "LIVE"
-              ? "bg-f1red text-white"
-              : "bg-panel border border-border text-gray-400 hover:text-white"
-          }`}
-        >
-          <Radio size={12} className={season === "LIVE" ? "animate-pulse" : ""} />
-          LIVE
-        </button>
-
         {/* Year tabs */}
         {years.map((y) => (
           <button
@@ -90,54 +64,8 @@ export default function RaceSelector({ onSelect, onLive }) {
         ))}
       </div>
 
-      {/* LIVE panel */}
-      {season === "LIVE" && (
-        <div className="bg-panel border border-border rounded-xl p-6">
-          {liveChecking ? (
-            <p className="text-gray-500 text-sm">Checking for live session...</p>
-          ) : liveStatus?.live ? (
-            <div className="flex flex-col gap-4">
-              <div className="flex items-center gap-3">
-                <span className="w-3 h-3 rounded-full bg-red-500 animate-pulse" />
-                <span className="text-white font-bold text-lg">Race in progress</span>
-              </div>
-              <div className="text-sm text-gray-400">
-                <p className="font-semibold text-white">
-                  {liveStatus.session?.location} Grand Prix
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {liveStatus.session?.year} &middot; Session key: {liveStatus.session?.session_key}
-                </p>
-              </div>
-              <button
-                onClick={() => onLive(liveStatus.session)}
-                className="w-fit px-6 py-2 bg-f1red hover:bg-red-700 rounded text-white font-bold text-sm transition-colors flex items-center gap-2"
-              >
-                <Radio size={14} />
-                Connect to Live Timing
-              </button>
-              <p className="text-[11px] text-gray-600">
-                Powered by OpenF1 API (openf1.org) — 100% free, no sign-up required
-              </p>
-            </div>
-          ) : (
-            <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-3">
-                <span className="w-3 h-3 rounded-full bg-gray-600" />
-                <span className="text-gray-400 font-semibold">No live race right now</span>
-              </div>
-              <p className="text-xs text-gray-600 leading-relaxed">
-                Live timing via OpenF1 is active during race weekends only.<br />
-                Select a season below to replay historical races at 2×/5×/10× speed.
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Historical race grid */}
-      {season !== "LIVE" && (
-        <>
+      <>
         <input
           type="text"
           placeholder="Search circuits…"
@@ -179,8 +107,7 @@ export default function RaceSelector({ onSelect, onLive }) {
             </button>
           ))}
         </div>
-        </>
-      )}
+      </>
     </div>
   );
 }
